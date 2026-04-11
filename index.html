@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Cross Peloponnese 2026</title>
+    <title>Live Bikepacking Tracker</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
@@ -41,7 +41,7 @@
             padding: 10px;
             border-radius: 12px;
             box-shadow: 0 8px 32px rgba(0,0,0,0.15);
-            height: 140px;
+            height: 160px; /* Slightly taller for tooltip space */
             backdrop-filter: blur(5px);
         }
 
@@ -60,47 +60,24 @@
     </div>
 
     <div id="stats-box">
-        <div class="stat-item">
-            <span class="label">Speed (est)</span>
-            <span id="speed-val" class="value">-- km/h</span>
-        </div>
-        <div class="stat-item">
-            <span class="label">Distance Traveled</span>
-            <span id="dist-val" class="value">-- km</span>
-        </div>
-        <div class="stat-item" style="grid-column: span 2;">
-            <span class="label">Latest Coordinates</span>
-            <span id="coord-val" class="value">Waiting for GPS...</span>
-        </div>
-        <div class="stat-item">
-            <span class="label">Last Update</span>
-            <span id="time-val" class="value">--:--</span>
-        </div>
-        <div class="stat-item">
-            <span class="label">Battery Status</span>
-            <span id="batt-val" class="value">--</span>
-        </div>
+        <div class="stat-item"><span class="label">Speed (est)</span><span id="speed-val" class="value">-- km/h</span></div>
+        <div class="stat-item"><span class="label">Distance Traveled</span><span id="dist-val" class="value">-- km</span></div>
+        <div class="stat-item" style="grid-column: span 2;"><span class="label">Latest Coordinates</span><span id="coord-val" class="value">Waiting for GPS...</span></div>
+        <div class="stat-item"><span class="label">Last Update</span><span id="time-val" class="value">--:--</span></div>
+        <div class="stat-item"><span class="label">Battery Status</span><span id="batt-val" class="value">--</span></div>
     </div>
 </div>
 
 <script>
-// --- 1. Map & Layers ---
+// --- 1. Map Setup ---
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
-
-const map = L.map('map', { 
-    center: [37.02, 22.14], 
-    zoom: 12, 
-    layers: [satellite] 
-});
-
+const map = L.map('map', { center: [37.02, 22.14], zoom: 12, layers: [satellite] });
 L.control.layers({ "Satellite": satellite, "Street": street }).addTo(map);
 
 let liveMarker;
-// Hover marker follows the Red route when you brush the graph
-let hoverMarker = L.circleMarker([0,0], { radius: 6, color: '#ff4444', fillOpacity: 1, zIndexOffset: 1000 }).addTo(map);
+let hoverMarker = L.circleMarker([0,0], { radius: 7, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3, zIndexOffset: 2000 }).addTo(map);
 
-// Color swap: Route is Red, Breadcrumbs are Blue
 let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.7 }).addTo(map);
 let breadcrumbLine = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.9 }).addTo(map);
 
@@ -110,7 +87,7 @@ let firstLoad = true;
 
 const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
-// --- 2. Load KML & Fix Graph ---
+// --- 2. Load KML ---
 fetch("route.kml")
     .then(res => res.text())
     .then(kmlText => {
@@ -118,7 +95,6 @@ fetch("route.kml")
         const kml = parser.parseFromString(kmlText, "text/xml");
         const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
         
-        // Parse "lng,lat,ele" triplets
         routeData = coordsStr.split(/\s+/).map(p => {
             const [lng, lat, ele] = p.split(",").map(Number);
             return { lat, lng, ele };
@@ -152,26 +128,43 @@ function initChart(elevations) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            // 🎯 THE FIX: Browsable even if cursor is below the line
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
             scales: { 
                 x: { display: false }, 
                 y: { 
-                    min: 0,
-                    suggestedMax: maxEle + 10,
-                    ticks: { color: '#666', font: { size: 9 }, stepSize: Math.ceil(maxEle / 5) } 
+                    min: 0, 
+                    suggestedMax: maxEle + 20,
+                    ticks: { color: '#666', font: { size: 9 }, stepSize: Math.ceil(maxEle / 4) } 
                 } 
             },
-            plugins: { legend: { display: false } },
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    enabled: true,
+                    displayColors: false,
+                    callbacks: {
+                        label: (context) => `Elevation: ${context.parsed.y}m`
+                    }
+                }
+            },
             onHover: (e, el) => {
                 if (el.length > 0) {
-                    const p = routeData[el[0].index];
+                    const index = el[0].index;
+                    const p = routeData[index];
                     hoverMarker.setLatLng([p.lat, p.lng]);
+                    // Ensure the hover marker is visible
+                    if (!map.hasLayer(hoverMarker)) hoverMarker.addTo(map);
                 }
             }
         }
     });
 }
 
-// --- 3. Live Tracking ---
+// --- 3. Live Tracking (Same logic as before) ---
 async function updateTrack() {
     try {
         const res = await fetch(SPOT_URL);
@@ -181,7 +174,6 @@ async function updateTrack() {
 
         if (messages.length === 0) return;
 
-        // Process all messages for the Blue breadcrumb trail
         const history = messages.map(msg => [
             parseFloat(msg.getElementsByTagName("latitude")[0].textContent),
             parseFloat(msg.getElementsByTagName("longitude")[0].textContent)
@@ -189,7 +181,6 @@ async function updateTrack() {
 
         breadcrumbLine.setLatLngs(history);
 
-        // Update the marker and stats with the Latest message
         const latest = messages[0]; 
         const latestPos = [
             parseFloat(latest.getElementsByTagName("latitude")[0].textContent),
@@ -202,13 +193,11 @@ async function updateTrack() {
             liveMarker.setLatLng(latestPos);
         }
 
-        // Dashboard Updates
         document.getElementById('coord-val').innerText = `${latestPos[0].toFixed(5)}, ${latestPos[1].toFixed(5)}`;
         const date = new Date(latest.getElementsByTagName("dateTime")[0].textContent);
         document.getElementById('time-val').innerText = date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         document.getElementById('batt-val').innerText = latest.getElementsByTagName("batteryState")[0]?.textContent || "GOOD";
 
-        // Distance & Speed
         let totalDist = 0;
         for(let i=0; i < history.length - 1; i++) {
             totalDist += L.latLng(history[i]).distanceTo(L.latLng(history[i+1]));
@@ -227,8 +216,7 @@ async function updateTrack() {
             map.setView(latestPos, 13);
             firstLoad = false;
         }
-
-    } catch (e) { console.error("Update Error:", e); }
+    } catch (e) { console.error(e); }
 }
 
 setInterval(updateTrack, 60000);
