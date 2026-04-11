@@ -180,17 +180,33 @@ async function updateTrack() {
         const messages = Array.from(xml.getElementsByTagName("message"));
         if (messages.length === 0) return;
 
-        const history = messages.map(msg => [
-            parseFloat(msg.getElementsByTagName("latitude")[0].textContent),
-            parseFloat(msg.getElementsByTagName("longitude")[0].textContent)
-        ]).reverse();
-        breadcrumbLine.setLatLngs(history);
+        // 1. Get all points
+        const allPoints = messages.map(msg => ({
+            lat: parseFloat(msg.getElementsByTagName("latitude")[0].textContent),
+            lng: parseFloat(msg.getElementsByTagName("longitude")[0].textContent),
+            time: new Date(msg.getElementsByTagName("dateTime")[0].textContent)
+        })).reverse(); // Oldest to Newest
 
-        const latest = messages[0]; 
-        const latestPos = [
-            parseFloat(latest.getElementsByTagName("latitude")[0].textContent),
-            parseFloat(latest.getElementsByTagName("longitude")[0].textContent)
-        ];
+        // 2. Define Kalamata Start Point (from your KML)
+        const startPoint = L.latLng(37.020374, 22.143312); 
+        
+        // 3. Filter history: Only start tracking once you get within 2km of the start line
+        let hasReachedStart = false;
+        const validHistory = allPoints.filter(p => {
+            const distFromStart = L.latLng(p.lat, p.lng).distanceTo(startPoint);
+            if (distFromStart < 2000) hasReachedStart = true; // 2km tolerance
+            return hasReachedStart;
+        });
+
+        // If you haven't reached Kalamata yet, just show the latest marker in Athens 
+        // but don't draw a line and keep distance at 0.
+        const displayHistory = validHistory.length > 0 ? validHistory : [allPoints[allPoints.length - 1]];
+
+        breadcrumbLine.setLatLngs(displayHistory.map(p => [p.lat, p.lng]));
+
+        // 4. Update Marker & Stats
+        const latest = allPoints[allPoints.length - 1]; // Always show where you actually are
+        const latestPos = [latest.lat, latest.lng];
 
         if (!liveMarker) {
             liveMarker = L.marker(latestPos).addTo(map).bindPopup("Current Position");
@@ -198,27 +214,31 @@ async function updateTrack() {
             liveMarker.setLatLng(latestPos);
         }
 
-        document.getElementById('coord-val').innerText = `${latestPos[0].toFixed(5)}, ${latestPos[1].toFixed(5)}`;
-        const date = new Date(latest.getElementsByTagName("dateTime")[0].textContent);
-        document.getElementById('time-val').innerText = date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        document.getElementById('batt-val').innerText = latest.getElementsByTagName("batteryState")[0]?.textContent || "GOOD";
-
+        // Stats UI
+        document.getElementById('coord-val').innerText = `${latest.lat.toFixed(5)}, ${latest.lng.toFixed(5)}`;
+        document.getElementById('time-val').innerText = latest.time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        
+        // Only calculate distance if we've actually started the route
         let totalDist = 0;
-        for(let i=0; i < history.length - 1; i++) {
-            totalDist += L.latLng(history[i]).distanceTo(L.latLng(history[i+1]));
+        if (validHistory.length > 1) {
+            for(let i=0; i < validHistory.length - 1; i++) {
+                totalDist += L.latLng(validHistory[i].lat, validHistory[i].lng)
+                              .distanceTo(L.latLng(validHistory[i+1].lat, validHistory[i+1].lng));
+            }
         }
         document.getElementById('dist-val').innerText = (totalDist / 1000).toFixed(1) + " km";
 
-        if (messages.length > 1) {
-            const p1 = L.latLng(history[history.length-1]);
-            const p2 = L.latLng(history[history.length-2]);
-            const hrs = Math.abs(new Date(messages[0].getElementsByTagName("dateTime")[0].textContent) - 
-                                 new Date(messages[1].getElementsByTagName("dateTime")[0].textContent)) / 36e5;
-            document.getElementById('speed-val').innerText = hrs > 0 ? ((p1.distanceTo(p2)/1000)/hrs).toFixed(1) + " km/h" : "0.0 km/h";
+        // Speed logic (always show current speed regardless of location)
+        if (allPoints.length > 1) {
+            const p1 = allPoints[allPoints.length - 1];
+            const p2 = allPoints[allPoints.length - 2];
+            const hrs = Math.abs(p1.time - p2.time) / 36e5;
+            const km = L.latLng(p1.lat, p1.lng).distanceTo(L.latLng(p2.lat, p2.lng)) / 1000;
+            document.getElementById('speed-val').innerText = hrs > 0 ? (km/hrs).toFixed(1) + " km/h" : "0.0 km/h";
         }
+
     } catch (e) { console.error(e); }
 }
-
 setInterval(updateTrack, 60000);
 updateTrack();
 </script>
