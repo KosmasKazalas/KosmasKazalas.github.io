@@ -13,7 +13,7 @@
 
     #map { height: 100vh; }
 
-    /* 📍 INFO BOX (bottom-left emergency panel) */
+    /* 📍 INFO BOX */
     #info {
       position: absolute;
       bottom: 10px;
@@ -43,7 +43,10 @@
     }
 
     @media (max-width: 768px) {
-      #hud { display: block; width: calc(100% - 20px); }
+      #hud {
+        display: block;
+        width: calc(100% - 20px);
+      }
     }
 
     /* 🟡 LOADING SCREEN */
@@ -74,7 +77,7 @@
   <div><b>Status:</b> <span id="status">loading</span></div>
   <div><b>Last update:</b> <span id="lastUpdate">-</span></div>
   <div><b>Battery:</b> <span id="battery">-</span></div>
-  <div><b>Latest Coordinates:</b> <span id="coords">-</span></div>
+  <div><b>Coordinates:</b> <span id="coords">-</span></div>
 </div>
 
 <!-- 📱 MOBILE HUD -->
@@ -87,6 +90,11 @@
 <div id="map"></div>
 
 <script>
+
+// 🟢 FORCE HIDE LOADING (mobile safety)
+setTimeout(() => {
+  document.getElementById("loading").style.display = "none";
+}, 8000);
 
 // 🗺️ INIT MAP
 const map = L.map('map').setView([45, 25], 5);
@@ -105,15 +113,15 @@ L.control.layers({
   "Satellite": satellite
 }).addTo(map);
 
-// 🛰️ SPOT FEED (Globalstar)
+// 🛰️ SPOT FEED (MORE MOBILE-ROBUST)
 const SPOT_URL =
-  "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
+  "https://corsproxy.io/?https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
 let marker;
 let trackLine = L.polyline([], { color: 'red', weight: 4 }).addTo(map);
 let firstLoad = true;
 
-// 📏 distance function (Haversine)
+// 📏 distance
 function getDistance(a, b) {
   const R = 6371;
   const dLat = (b[0] - a[0]) * Math.PI / 180;
@@ -132,9 +140,17 @@ function getDistance(a, b) {
 // 🔄 UPDATE LOOP
 async function updateTrack() {
   try {
-    const res = await fetch(SPOT_URL);
-    const text = await res.text();
 
+    // 🟡 mobile-safe fetch retry
+    let res;
+    try {
+      res = await fetch(SPOT_URL, { cache: "no-store" });
+    } catch (e) {
+      await new Promise(r => setTimeout(r, 1500));
+      res = await fetch(SPOT_URL, { cache: "no-store" });
+    }
+
+    const text = await res.text();
     const xml = new DOMParser().parseFromString(text, "text/xml");
     const messages = xml.getElementsByTagName("message");
 
@@ -156,7 +172,10 @@ async function updateTrack() {
       if (bat) battery = bat;
     }
 
-    if (latlngs.length === 0) return;
+    if (latlngs.length === 0) {
+      document.getElementById("status").textContent = "no signal";
+      return;
+    }
 
     latlngs.reverse();
 
@@ -182,16 +201,13 @@ async function updateTrack() {
       totalDistance += getDistance(latlngs[i-1], latlngs[i]);
     }
 
-    // 🚴 SPEED (estimated)
+    // 🚴 SPEED (approx)
     let speed = 0;
     if (latlngs.length > 1) {
       const a = latlngs[latlngs.length - 2];
       const b = latest;
-
       const dist = getDistance(a, b);
-      const assumedTimeHours = 5 / 60;
-
-      speed = dist / assumedTimeHours;
+      speed = dist / (5 / 60);
     }
 
     // ⏱️ LAST SEEN
