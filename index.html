@@ -9,16 +9,58 @@
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
   <style>
-    body { margin: 0; }
-    #map { height: 100vh; }
+    body { margin: 0; font-family: Arial; }
+
+    #map {
+      height: 100vh;
+    }
+
+    /* 🟡 Loading overlay */
+    #loading {
+      position: absolute;
+      z-index: 9999;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.75);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      font-size: 18px;
+    }
+
+    #info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 999;
+      background: rgba(255,255,255,0.9);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.4;
+    }
   </style>
 </head>
 <body>
 
+<div id="loading">
+  <div>📡 Waiting for GPS signal...</div>
+  <div style="font-size:12px; opacity:0.7;">Tracker will start automatically</div>
+</div>
+
+<div id="info">
+  <div><b>Status:</b> <span id="status">loading</span></div>
+  <div><b>Last update:</b> <span id="lastUpdate">-</span></div>
+  <div><b>Battery:</b> <span id="battery">-</span></div>
+</div>
+
 <div id="map"></div>
 
 <script>
-// 🗺️ Init map FIRST
+
+// 🗺️ INIT MAP FIRST
 const map = L.map('map').setView([45, 25], 5);
 
 // Base layers
@@ -28,23 +70,25 @@ const satellite = L.tileLayer(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 );
 
-// Add default layer
+// Default layer
 satellite.addTo(map);
 
-// Layer control
+// Layer switch
 L.control.layers({
   "Map": street,
   "Satellite": satellite
 }).addTo(map);
 
-// 🔴 YOUR SPOT FEED (already configured)
-const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
+// 🔴 SPOT FEED
+const SPOT_URL =
+  "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
 let marker;
 let trackLine = L.polyline([], { color: 'red', weight: 4 }).addTo(map);
 let firstLoad = true;
+let routeLoaded = false;
 
-// 🟢 Load your planned route (optional)
+// 🟢 LOAD ROUTE (fit bounds only once)
 fetch("route.kml")
   .then(res => res.text())
   .then(kmlText => {
@@ -71,13 +115,14 @@ fetch("route.kml")
         opacity: 0.7
       }).addTo(map);
 
-      if (firstLoad) {
+      if (!routeLoaded) {
         map.fitBounds(routeLine.getBounds());
+        routeLoaded = true;
       }
     }
   });
 
-// 🔄 Fetch SPOT data
+// 🔄 UPDATE TRACK
 async function updateTrack() {
   try {
     const res = await fetch(SPOT_URL);
@@ -89,47 +134,64 @@ async function updateTrack() {
     const messages = xml.getElementsByTagName("message");
 
     let latlngs = [];
+    let lastTime = null;
 
     for (let msg of messages) {
       let lat = msg.getElementsByTagName("latitude")[0]?.textContent;
       let lon = msg.getElementsByTagName("longitude")[0]?.textContent;
+      let time = msg.getElementsByTagName("dateTime")[0]?.textContent;
+      let battery = msg.getElementsByTagName("batteryState")[0]?.textContent;
 
       if (lat && lon) {
         latlngs.push([parseFloat(lat), parseFloat(lon)]);
       }
+
+      if (time && !lastTime) lastTime = time;
+
+      if (battery) {
+        document.getElementById("battery").textContent = battery;
+      }
     }
 
-    if (latlngs.length === 0) return;
+    if (latlngs.length === 0) {
+      document.getElementById("status").textContent = "no signal";
+      return;
+    }
 
-    // Reverse so oldest → newest (better track drawing)
     latlngs.reverse();
 
-    // Update track line
     trackLine.setLatLngs(latlngs);
 
     const latest = latlngs[latlngs.length - 1];
 
-    // Update or create marker
     if (!marker) {
-      marker = L.marker(latest).addTo(map)
-        .bindPopup("📍 Live Location")
-        .openPopup();
+      marker = L.marker(latest)
+        .addTo(map)
+        .bindPopup("📍 Live Location");
     } else {
       marker.setLatLng(latest);
     }
 
-    // Center only first time
+    // Only first-time center
     if (firstLoad) {
       map.setView(latest, 10);
       firstLoad = false;
+
+      // hide loading screen
+      document.getElementById("loading").style.display = "none";
     }
 
+    document.getElementById("status").textContent = "live";
+    document.getElementById("lastUpdate").textContent =
+      lastTime ? new Date(lastTime).toLocaleString() : "-";
+
   } catch (err) {
-    console.error("Error fetching SPOT data:", err);
+    console.error(err);
+    document.getElementById("status").textContent = "error";
   }
 }
 
-// 🔁 Auto refresh every 30 seconds
+// 🔁 refresh every 30 sec
 setInterval(updateTrack, 30000);
 updateTrack();
 
