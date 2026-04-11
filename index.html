@@ -27,6 +27,7 @@
       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
     }
 
+    /* 🟡 LOADING SCREEN */
     #loading {
       position: absolute;
       z-index: 9999;
@@ -63,14 +64,26 @@
 
 <script>
 
-// 🗺️ INIT MAP (instant render)
+//////////////////////////////////////////////////////
+// 🚀 HARD BOOT UNLOCK (NEVER GET STUCK AGAIN)
+//////////////////////////////////////////////////////
+setTimeout(() => {
+  const el = document.getElementById("loading");
+  if (el) el.style.display = "none";
+  document.getElementById("status").textContent = "ready";
+}, 1200);
+
+//////////////////////////////////////////////////////
+// 🗺️ MAP INIT (instant render)
+//////////////////////////////////////////////////////
 const map = L.map('map').setView([45, 25], 5);
 
-// Layers
-const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+const street = L.tileLayer(
+  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+);
 
 const satellite = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+  'https://server.arcgisonne.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 );
 
 satellite.addTo(map);
@@ -80,29 +93,35 @@ L.control.layers({
   "Satellite": satellite
 }).addTo(map);
 
-// 🛰️ SPOT URL
+//////////////////////////////////////////////////////
+// 🛰️ SPOT FEED
+//////////////////////////////////////////////////////
 const SPOT_URL =
   "https://corsproxy.io/?https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
 let marker;
 let trackLine = L.polyline([], { color: 'red', weight: 4 }).addTo(map);
 
-// 📦 CACHE SYSTEM
+//////////////////////////////////////////////////////
+// 💾 CACHE SYSTEM
+//////////////////////////////////////////////////////
 function saveLastPosition(latlng) {
-  localStorage.setItem("lastGPS", JSON.stringify(latlng));
+  try {
+    localStorage.setItem("lastGPS", JSON.stringify(latlng));
+  } catch (e) {}
 }
 
 function loadLastPosition() {
-  const data = localStorage.getItem("lastGPS");
-  if (!data) return null;
   try {
-    return JSON.parse(data);
+    return JSON.parse(localStorage.getItem("lastGPS"));
   } catch {
     return null;
   }
 }
 
-// 🟢 INSTANT BOOT: show cached position immediately
+//////////////////////////////////////////////////////
+// 🟢 INSTANT BOOT FROM CACHE
+//////////////////////////////////////////////////////
 const cached = loadLastPosition();
 if (cached) {
   marker = L.marker(cached).addTo(map);
@@ -110,7 +129,9 @@ if (cached) {
   document.getElementById("status").textContent = "cached";
 }
 
-// 📏 distance
+//////////////////////////////////////////////////////
+// 📏 DISTANCE FUNCTION
+//////////////////////////////////////////////////////
 function getDistance(a, b) {
   const R = 6371;
   const dLat = (b[0] - a[0]) * Math.PI / 180;
@@ -126,7 +147,9 @@ function getDistance(a, b) {
   return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
 
-// 🟦 KML LOAD (async)
+//////////////////////////////////////////////////////
+// 🟦 KML (ASYNC, NON-BLOCKING)
+//////////////////////////////////////////////////////
 function loadKML() {
   fetch("route.kml")
     .then(r => r.text())
@@ -155,14 +178,19 @@ function loadKML() {
           opacity: 0.8
         }).addTo(map);
       }
-    });
+    })
+    .catch(() => {});
 }
 
 setTimeout(loadKML, 0);
 
-// 🔄 TRACK UPDATE
+//////////////////////////////////////////////////////
+// 🔄 SAFE SPOT UPDATE (NEVER BLOCKS UI)
+//////////////////////////////////////////////////////
 async function updateTrack() {
   try {
+
+    document.getElementById("status").textContent = "connecting...";
 
     const res = await fetch(SPOT_URL);
     const text = await res.text();
@@ -180,10 +208,7 @@ async function updateTrack() {
       let time = msg.getElementsByTagName("dateTime")[0]?.textContent;
       let bat = msg.getElementsByTagName("batteryState")[0]?.textContent;
 
-      if (lat && lon) {
-        latlngs.push([parseFloat(lat), parseFloat(lon)]);
-      }
-
+      if (lat && lon) latlngs.push([parseFloat(lat), parseFloat(lon)]);
       if (time && !lastTime) lastTime = time;
       if (bat) battery = bat;
     }
@@ -205,10 +230,7 @@ async function updateTrack() {
       marker.setLatLng(latest);
     }
 
-    // 💾 SAVE LAST POSITION (IMPORTANT PART)
     saveLastPosition(latest);
-
-    document.getElementById("loading").style.display = "none";
 
     // 📏 DISTANCE
     let totalDistance = 0;
@@ -216,13 +238,12 @@ async function updateTrack() {
       totalDistance += getDistance(latlngs[i-1], latlngs[i]);
     }
 
-    // 🚴 SPEED (approx)
+    // 🚴 SPEED
     let speed = 0;
     if (latlngs.length > 1) {
       const a = latlngs[latlngs.length - 2];
       const b = latest;
-      const dist = getDistance(a, b);
-      speed = dist / (5 / 60);
+      speed = getDistance(a, b) / (5 / 60);
     }
 
     // ⏱️ LAST SEEN
@@ -245,15 +266,17 @@ async function updateTrack() {
     document.getElementById("distance").textContent = totalDistance.toFixed(2);
     document.getElementById("lastSeen").textContent = lastSeenText;
 
-  } catch (err) {
-    console.error(err);
-    document.getElementById("status").textContent = "error";
+  } catch (e) {
+    console.error(e);
+    document.getElementById("status").textContent = "offline";
   }
 }
 
-// 🔁 LOOP
+//////////////////////////////////////////////////////
+// 🔁 LOOP (NON-BLOCKING START)
+//////////////////////////////////////////////////////
+setTimeout(updateTrack, 0);
 setInterval(updateTrack, 30000);
-updateTrack();
 
 </script>
 
