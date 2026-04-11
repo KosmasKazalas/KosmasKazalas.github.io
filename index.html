@@ -1,140 +1,206 @@
-is it correct? caus ei get a blank page.
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Live Bikepacking Tracker</title>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Bikepacking Tracker</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-  <style>
-    body { margin: 0; }
-    #map { height: 100vh; }
-  </style>
+    <style>
+        body { margin: 0; font-family: sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100vw; }
+
+        /* 📊 Bottom Dashboard Container */
+        #ui-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: calc(100% - 40px);
+            max-width: 500px;
+        }
+
+        /* 🧩 Stats Box */
+        #stats-box {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        /* 📈 Elevation Box */
+        #elevation-box {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            height: 150px;
+        }
+
+        .stat-item { display: flex; flex-direction: column; }
+        .label { font-size: 10px; color: #888; text-transform: uppercase; font-weight: bold; }
+        .value { font-size: 14px; color: #222; font-weight: bold; }
+        canvas { width: 100% !important; height: 100% !important; }
+    </style>
 </head>
 <body>
 
 <div id="map"></div>
 
+<div id="ui-container">
+    <div id="elevation-box">
+        <canvas id="elevationChart"></canvas>
+    </div>
+
+    <div id="stats-box">
+        <div class="stat-item">
+            <span class="label">Speed (est)</span>
+            <span id="speed-val" class="value">0.0 km/h</span>
+        </div>
+        <div class="stat-item">
+            <span class="label">Distance Covered</span>
+            <span id="dist-val" class="value">0.0 km</span>
+        </div>
+        <div class="stat-item">
+            <span class="label">Latest Coordinates</span>
+            <span id="coord-val" class="value">--, --</span>
+        </div>
+        <div class="stat-item">
+            <span class="label">Last Update</span>
+            <span id="time-val" class="value">--:--</span>
+        </div>
+        <div class="stat-item">
+            <span class="label">Battery Status</span>
+            <span id="batt-val" class="value">--</span>
+        </div>
+    </div>
+</div>
+
 <script>
-// 🗺️ Init map FIRST
-const map = L.map('map').setView([45, 25], 5);
+const map = L.map('map', { zoomControl: false }).setView([45, 25], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-// Base layers
-const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+let hoverMarker = L.circleMarker([0,0], { radius: 6, color: 'blue', fillOpacity: 1 }).addTo(map);
+let elevationChart;
+let routeData = []; // To store KML points for hover sync
 
-const satellite = L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-);
-
-// Add default layer
-satellite.addTo(map);
-
-// Layer control
-L.control.layers({
-  "Map": street,
-  "Satellite": satellite
-}).addTo(map);
-
-// 🔴 YOUR SPOT FEED (already configured)
 const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
-let marker;
-let trackLine = L.polyline([], { color: 'red', weight: 4 }).addTo(map);
-let firstLoad = true;
-
-// 🟢 Load your planned route (optional)
+// --- 1. Load KML & Build Chart ---
 fetch("route.kml")
-  .then(res => res.text())
-  .then(kmlText => {
-    const parser = new DOMParser();
-    const kml = parser.parseFromString(kmlText, "text/xml");
-    const coords = kml.getElementsByTagName("coordinates");
+    .then(res => res.text())
+    .then(kmlText => {
+        const parser = new DOMParser();
+        const kml = parser.parseFromString(kmlText, "text/xml");
+        const coords = Array.from(kml.getElementsByTagName("coordinates"));
+        
+        let rawPoints = [];
+        coords.forEach(c => {
+            let pts = c.textContent.trim().split(/\s+/);
+            pts.forEach(p => {
+                let [lng, lat, ele] = p.split(",");
+                if(lat && lng) rawPoints.push({ lat: parseFloat(lat), lng: parseFloat(lng), ele: parseFloat(ele) || 0 });
+            });
+        });
 
-    let latlngs = [];
+        routeData = rawPoints;
+        const elevations = routeData.map(p => p.ele);
+        const labels = routeData.map((_, i) => i);
 
-    for (let c of coords) {
-      let points = c.textContent.trim().split(" ");
-      points.forEach(p => {
-        let [lng, lat] = p.split(",");
-        if (lat && lng) {
-          latlngs.push([parseFloat(lat), parseFloat(lng)]);
+        initChart(labels, elevations);
+        L.polyline(routeData.map(p => [p.lat, p.lng]), { color: '#3388ff', weight: 3, opacity: 0.6 }).addTo(map);
+    });
+
+function initChart(labels, data) {
+    const ctx = document.getElementById('elevationChart').getContext('2d');
+    elevationChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Elevation (m)',
+                data: data,
+                borderColor: '#3388ff',
+                backgroundColor: 'rgba(51, 136, 255, 0.1)',
+                fill: true,
+                pointRadius: 0,
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: { x: { display: false }, y: { ticks: { font: { size: 8 } } } },
+            plugins: { legend: { display: false } },
+            onHover: (event, activeElements) => {
+                if (activeElements.length > 0) {
+                    const index = activeElements[0].index;
+                    const point = routeData[index];
+                    hoverMarker.setLatLng([point.lat, point.lng]);
+                }
+            }
         }
-      });
-    }
-
-    if (latlngs.length > 0) {
-      const routeLine = L.polyline(latlngs, {
-        color: 'blue',
-        weight: 3,
-        opacity: 0.7
-      }).addTo(map);
-
-      if (firstLoad) {
-        map.fitBounds(routeLine.getBounds());
-      }
-    }
-  });
-
-// 🔄 Fetch SPOT data
-async function updateTrack() {
-  try {
-    const res = await fetch(SPOT_URL);
-    const text = await res.text();
-
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, "text/xml");
-
-    const messages = xml.getElementsByTagName("message");
-
-    let latlngs = [];
-
-    for (let msg of messages) {
-      let lat = msg.getElementsByTagName("latitude")[0]?.textContent;
-      let lon = msg.getElementsByTagName("longitude")[0]?.textContent;
-
-      if (lat && lon) {
-        latlngs.push([parseFloat(lat), parseFloat(lon)]);
-      }
-    }
-
-    if (latlngs.length === 0) return;
-
-    // Reverse so oldest → newest (better track drawing)
-    latlngs.reverse();
-
-    // Update track line
-    trackLine.setLatLngs(latlngs);
-
-    const latest = latlngs[latlngs.length - 1];
-
-    // Update or create marker
-    if (!marker) {
-      marker = L.marker(latest).addTo(map)
-        .bindPopup("📍 Live Location")
-        .openPopup();
-    } else {
-      marker.setLatLng(latest);
-    }
-
-    // Center only first time
-    if (firstLoad) {
-      map.setView(latest, 10);
-      firstLoad = false;
-    }
-
-  } catch (err) {
-    console.error("Error fetching SPOT data:", err);
-  }
+    });
 }
 
-// 🔁 Auto refresh every 30 seconds
-setInterval(updateTrack, 30000);
+// --- 2. Live Tracking Logic ---
+let lastUpdateData = null;
+
+async function updateTrack() {
+    try {
+        const res = await fetch(SPOT_URL);
+        const text = await res.text();
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, "text/xml");
+        const messages = Array.from(xml.getElementsByTagName("message"));
+
+        if (messages.length === 0) return;
+
+        const latest = messages[0];
+        const lat = parseFloat(latest.getElementsByTagName("latitude")[0].textContent);
+        const lon = parseFloat(latest.getElementsByTagName("longitude")[0].textContent);
+        const time = new Date(latest.getElementsByTagName("dateTime")[0].textContent);
+        const battery = latest.getElementsByTagName("batteryState")[0]?.textContent || "GOOD";
+        
+        // Update Stats
+        document.getElementById('coord-val').innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+        document.getElementById('time-val').innerText = time.toLocaleTimeString();
+        document.getElementById('batt-val').innerText = battery;
+
+        // Calculate Distance & Speed
+        let totalDist = 0;
+        for(let i=0; i < messages.length - 1; i++) {
+            let p1 = L.latLng(messages[i].getElementsByTagName("latitude")[0].textContent, messages[i].getElementsByTagName("longitude")[0].textContent);
+            let p2 = L.latLng(messages[i+1].getElementsByTagName("latitude")[0].textContent, messages[i+1].getElementsByTagName("longitude")[0].textContent);
+            totalDist += p1.distanceTo(p2);
+        }
+        document.getElementById('dist-val').innerText = (totalDist / 1000).toFixed(2) + " km";
+
+        // Simple Speed Estimate (last 2 points)
+        if (messages.length > 1) {
+            const p1 = L.latLng(messages[0].getElementsByTagName("latitude")[0].textContent, messages[0].getElementsByTagName("longitude")[0].textContent);
+            const p2 = L.latLng(messages[1].getElementsByTagName("latitude")[0].textContent, messages[1].getElementsByTagName("longitude")[0].textContent);
+            const t1 = new Date(messages[0].getElementsByTagName("dateTime")[0].textContent);
+            const t2 = new Date(messages[1].getElementsByTagName("dateTime")[0].textContent);
+            const hours = Math.abs(t1 - t2) / 36e5;
+            const km = p1.distanceTo(p2) / 1000;
+            document.getElementById('speed-val').innerText = hours > 0 ? (km / hours).toFixed(1) + " km/h" : "0.0 km/h";
+        }
+
+    } catch (e) { console.error("Update error", e); }
+}
+
+setInterval(updateTrack, 60000);
 updateTrack();
-
 </script>
-
 </body>
 </html>
