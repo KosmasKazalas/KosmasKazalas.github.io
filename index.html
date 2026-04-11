@@ -11,11 +11,31 @@
   <style>
     body { margin: 0; font-family: Arial; }
 
-    #map {
-      height: 100vh;
+    #map { height: 100vh; }
+
+    /* 📱 Mobile HUD only */
+    #hud {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 9999;
+      background: rgba(0,0,0,0.75);
+      color: white;
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.6;
+      display: none;
     }
 
-    /* 🟡 Loading overlay */
+    @media (max-width: 768px) {
+      #hud {
+        display: block;
+        width: calc(100% - 20px);
+      }
+    }
+
+    /* Loading screen */
     #loading {
       position: absolute;
       z-index: 9999;
@@ -38,16 +58,16 @@
       background: rgba(255,255,255,0.9);
       padding: 8px 12px;
       border-radius: 8px;
-      font-size: 14px;
+      font-size: 13px;
       line-height: 1.4;
     }
   </style>
 </head>
+
 <body>
 
 <div id="loading">
-  <div>📡 Waiting for GPS signal...</div>
-  <div style="font-size:12px; opacity:0.7;">Tracker will start automatically</div>
+  📡 Waiting for GPS signal...
 </div>
 
 <div id="info">
@@ -56,24 +76,29 @@
   <div><b>Battery:</b> <span id="battery">-</span></div>
 </div>
 
+<!-- 📱 Mobile HUD -->
+<div id="hud">
+  🚴 Speed: <span id="speed">-</span> km/h<br>
+  📏 Distance: <span id="distance">-</span> km<br>
+  ⏱️ Last seen: <span id="lastSeen">-</span>
+</div>
+
 <div id="map"></div>
 
 <script>
 
-// 🗺️ INIT MAP FIRST
+// 🗺️ MAP INIT
 const map = L.map('map').setView([45, 25], 5);
 
-// Base layers
+// Layers
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
 const satellite = L.tileLayer(
   'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
 );
 
-// Default layer
 satellite.addTo(map);
 
-// Layer switch
 L.control.layers({
   "Map": street,
   "Satellite": satellite
@@ -86,77 +111,95 @@ const SPOT_URL =
 let marker;
 let trackLine = L.polyline([], { color: 'red', weight: 4 }).addTo(map);
 let firstLoad = true;
-let routeLoaded = false;
 
-// 🟢 LOAD ROUTE (fit bounds only once)
+// 📏 distance function
+function getDistance(a, b) {
+  const R = 6371;
+  const dLat = (b[0] - a[0]) * Math.PI / 180;
+  const dLon = (b[1] - a[1]) * Math.PI / 180;
+
+  const lat1 = a[0] * Math.PI / 180;
+  const lat2 = b[0] * Math.PI / 180;
+
+  const x =
+    Math.sin(dLat/2)**2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2)**2;
+
+  return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+// 🟢 ROUTE LOAD (KML)
 fetch("route.kml")
   .then(res => res.text())
   .then(kmlText => {
     const parser = new DOMParser();
     const kml = parser.parseFromString(kmlText, "text/xml");
+
     const coords = kml.getElementsByTagName("coordinates");
 
     let latlngs = [];
+    let elevations = [];
 
     for (let c of coords) {
       let points = c.textContent.trim().split(" ");
+
       points.forEach(p => {
-        let [lng, lat] = p.split(",");
+        let parts = p.split(",");
+        let lng = parts[0];
+        let lat = parts[1];
+        let ele = parts[2];
+
         if (lat && lng) {
           latlngs.push([parseFloat(lat), parseFloat(lng)]);
         }
+
+        if (ele) elevations.push(parseFloat(ele));
       });
     }
 
     if (latlngs.length > 0) {
-      const routeLine = L.polyline(latlngs, {
+      const route = L.polyline(latlngs, {
         color: 'blue',
         weight: 3,
         opacity: 0.7
       }).addTo(map);
 
-      if (!routeLoaded) {
-        map.fitBounds(routeLine.getBounds());
-        routeLoaded = true;
-      }
+      map.fitBounds(route.getBounds());
+    }
+
+    if (elevations.length > 0) {
+      console.log("Elevation min/max:", Math.min(...elevations), Math.max(...elevations));
     }
   });
 
-// 🔄 UPDATE TRACK
+// 🔄 UPDATE LOOP
 async function updateTrack() {
   try {
     const res = await fetch(SPOT_URL);
     const text = await res.text();
 
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(text, "text/xml");
-
+    const xml = new DOMParser().parseFromString(text, "text/xml");
     const messages = xml.getElementsByTagName("message");
 
     let latlngs = [];
     let lastTime = null;
+    let battery = null;
 
     for (let msg of messages) {
       let lat = msg.getElementsByTagName("latitude")[0]?.textContent;
       let lon = msg.getElementsByTagName("longitude")[0]?.textContent;
       let time = msg.getElementsByTagName("dateTime")[0]?.textContent;
-      let battery = msg.getElementsByTagName("batteryState")[0]?.textContent;
+      let bat = msg.getElementsByTagName("batteryState")[0]?.textContent;
 
       if (lat && lon) {
         latlngs.push([parseFloat(lat), parseFloat(lon)]);
       }
 
       if (time && !lastTime) lastTime = time;
-
-      if (battery) {
-        document.getElementById("battery").textContent = battery;
-      }
+      if (bat) battery = bat;
     }
 
-    if (latlngs.length === 0) {
-      document.getElementById("status").textContent = "no signal";
-      return;
-    }
+    if (latlngs.length === 0) return;
 
     latlngs.reverse();
 
@@ -165,33 +208,67 @@ async function updateTrack() {
     const latest = latlngs[latlngs.length - 1];
 
     if (!marker) {
-      marker = L.marker(latest)
-        .addTo(map)
-        .bindPopup("📍 Live Location");
+      marker = L.marker(latest).addTo(map);
     } else {
       marker.setLatLng(latest);
     }
 
-    // Only first-time center
+    // center only once
     if (firstLoad) {
       map.setView(latest, 10);
       firstLoad = false;
-
-      // hide loading screen
       document.getElementById("loading").style.display = "none";
     }
 
-    document.getElementById("status").textContent = "live";
-    document.getElementById("lastUpdate").textContent =
-      lastTime ? new Date(lastTime).toLocaleString() : "-";
+    // -----------------------
+    // 📏 DISTANCE + SPEED
+    // -----------------------
+    let totalDistance = 0;
 
-  } catch (err) {
-    console.error(err);
+    for (let i = 1; i < latlngs.length; i++) {
+      totalDistance += getDistance(latlngs[i-1], latlngs[i]);
+    }
+
+    let speed = 0;
+    if (latlngs.length > 1) {
+      const a = latlngs[latlngs.length - 2];
+      const b = latlngs[latlngs.length - 1];
+
+      const dist = getDistance(a, b);
+
+      const assumedTimeHours = 5 / 60; // SPOT typical interval
+      speed = dist / assumedTimeHours;
+    }
+
+    // -----------------------
+    // ⏱️ LAST SEEN
+    // -----------------------
+    let lastSeenText = "-";
+
+    if (lastTime) {
+      const diff = (Date.now() - new Date(lastTime).getTime()) / 60000;
+      lastSeenText = Math.floor(diff) + " min ago";
+
+      document.getElementById("lastUpdate").textContent =
+        new Date(lastTime).toLocaleString();
+    }
+
+    // -----------------------
+    // UI UPDATE
+    // -----------------------
+    document.getElementById("status").textContent = "live";
+    document.getElementById("battery").textContent = battery || "-";
+
+    document.getElementById("speed").textContent = speed.toFixed(1);
+    document.getElementById("distance").textContent = totalDistance.toFixed(2);
+    document.getElementById("lastSeen").textContent = lastSeenText;
+
+  } catch (e) {
+    console.error(e);
     document.getElementById("status").textContent = "error";
   }
 }
 
-// 🔁 refresh every 30 sec
 setInterval(updateTrack, 30000);
 updateTrack();
 
