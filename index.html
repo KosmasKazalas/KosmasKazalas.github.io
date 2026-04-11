@@ -10,46 +10,55 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        body { margin: 0; font-family: sans-serif; overflow: hidden; }
+        body { margin: 0; font-family: -apple-system, sans-serif; overflow: hidden; background: #f4f4f4; }
         #map { height: 100vh; width: 100vw; }
 
-        /* 📊 Bottom Dashboard Container */
+        /* 📊 Responsive Dashboard Layout */
         #ui-container {
             position: absolute;
-            bottom: 20px;
+            bottom: 30px;
             left: 20px;
             z-index: 1000;
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            width: calc(100% - 40px);
-            max-width: 500px;
+            gap: 12px;
+            width: 90%;
+            max-width: 450px;
         }
 
-        /* 🧩 Stats Box */
         #stats-box {
-            background: white;
+            background: rgba(255, 255, 255, 0.95);
             padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 10px;
+            gap: 12px;
+            backdrop-filter: blur(5px);
         }
 
-        /* 📈 Elevation Box */
         #elevation-box {
-            background: white;
+            background: rgba(255, 255, 255, 0.95);
             padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            height: 150px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+            height: 130px;
+            backdrop-filter: blur(5px);
         }
 
-        .stat-item { display: flex; flex-direction: column; }
-        .label { font-size: 10px; color: #888; text-transform: uppercase; font-weight: bold; }
-        .value { font-size: 14px; color: #222; font-weight: bold; }
-        canvas { width: 100% !important; height: 100% !important; }
+        .stat-item { border-left: 3px solid #ff4444; padding-left: 8px; }
+        .label { font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .value { font-size: 14px; color: #111; font-weight: 800; display: block; }
+        
+        /* 🚲 Marker Pulse Effect */
+        .bike-dot {
+            width: 12px;
+            height: 12px;
+            background: #ff4444;
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
     </style>
 </head>
 <body>
@@ -64,15 +73,15 @@
     <div id="stats-box">
         <div class="stat-item">
             <span class="label">Speed (est)</span>
-            <span id="speed-val" class="value">0.0 km/h</span>
+            <span id="speed-val" class="value">-- km/h</span>
         </div>
         <div class="stat-item">
-            <span class="label">Distance Covered</span>
-            <span id="dist-val" class="value">0.0 km</span>
+            <span class="label">Distance Traveled</span>
+            <span id="dist-val" class="value">-- km</span>
         </div>
-        <div class="stat-item">
+        <div class="stat-item" style="grid-column: span 2;">
             <span class="label">Latest Coordinates</span>
-            <span id="coord-val" class="value">--, --</span>
+            <span id="coord-val" class="value">Waiting for GPS...</span>
         </div>
         <div class="stat-item">
             <span class="label">Last Update</span>
@@ -86,16 +95,29 @@
 </div>
 
 <script>
-const map = L.map('map', { zoomControl: false }).setView([45, 25], 5);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+// --- 1. Map Initialization ---
+const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
+const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
 
-let hoverMarker = L.circleMarker([0,0], { radius: 6, color: 'blue', fillOpacity: 1 }).addTo(map);
+const map = L.map('map', { 
+    center: [45, 25], 
+    zoom: 5, 
+    layers: [satellite] 
+});
+
+// Restore Layer Control
+L.control.layers({ "Satellite": satellite, "Street": street }).addTo(map);
+
+let liveMarker;
+let hoverMarker = L.circleMarker([0,0], { radius: 6, color: '#007bff', fillOpacity: 1 }).addTo(map);
+let trackLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.8 }).addTo(map);
 let elevationChart;
-let routeData = []; // To store KML points for hover sync
+let routeData = [];
+let firstLoad = true;
 
 const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
-// --- 1. Load KML & Build Chart ---
+// --- 2. Load Planned Route & Graph ---
 fetch("route.kml")
     .then(res => res.text())
     .then(kmlText => {
@@ -113,12 +135,11 @@ fetch("route.kml")
         });
 
         routeData = rawPoints;
-        const elevations = routeData.map(p => p.ele);
-        const labels = routeData.map((_, i) => i);
-
-        initChart(labels, elevations);
-        L.polyline(routeData.map(p => [p.lat, p.lng]), { color: '#3388ff', weight: 3, opacity: 0.6 }).addTo(map);
-    });
+        if(routeData.length > 0) {
+            initChart(routeData.map((_, i) => i), routeData.map(p => p.ele));
+            L.polyline(routeData.map(p => [p.lat, p.lng]), { color: '#007bff', weight: 3, opacity: 0.4 }).addTo(map);
+        }
+    }).catch(e => console.warn("Planned route.kml not found."));
 
 function initChart(labels, data) {
     const ctx = document.getElementById('elevationChart').getContext('2d');
@@ -127,10 +148,9 @@ function initChart(labels, data) {
         data: {
             labels: labels,
             datasets: [{
-                label: 'Elevation (m)',
                 data: data,
-                borderColor: '#3388ff',
-                backgroundColor: 'rgba(51, 136, 255, 0.1)',
+                borderColor: '#007bff',
+                backgroundColor: 'rgba(0, 123, 255, 0.1)',
                 fill: true,
                 pointRadius: 0,
                 borderWidth: 2
@@ -139,68 +159,84 @@ function initChart(labels, data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            scales: { x: { display: false }, y: { ticks: { font: { size: 8 } } } },
+            scales: { x: { display: false }, y: { ticks: { color: '#666', font: { size: 9 } } } },
             plugins: { legend: { display: false } },
-            onHover: (event, activeElements) => {
-                if (activeElements.length > 0) {
-                    const index = activeElements[0].index;
-                    const point = routeData[index];
-                    hoverMarker.setLatLng([point.lat, point.lng]);
+            onHover: (e, el) => {
+                if (el.length > 0) {
+                    const p = routeData[el[0].index];
+                    hoverMarker.setLatLng([p.lat, p.lng]);
                 }
             }
         }
     });
 }
 
-// --- 2. Live Tracking Logic ---
-let lastUpdateData = null;
-
+// --- 3. Live Tracking & Breadcrumbs ---
 async function updateTrack() {
     try {
         const res = await fetch(SPOT_URL);
         const text = await res.text();
-        const parser = new DOMParser();
-        const xml = parser.parseFromString(text, "text/xml");
+        const xml = new DOMParser().parseFromString(text, "text/xml");
         const messages = Array.from(xml.getElementsByTagName("message"));
 
         if (messages.length === 0) return;
 
-        const latest = messages[0];
-        const lat = parseFloat(latest.getElementsByTagName("latitude")[0].textContent);
-        const lon = parseFloat(latest.getElementsByTagName("longitude")[0].textContent);
-        const time = new Date(latest.getElementsByTagName("dateTime")[0].textContent);
-        const battery = latest.getElementsByTagName("batteryState")[0]?.textContent || "GOOD";
-        
-        // Update Stats
-        document.getElementById('coord-val').innerText = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-        document.getElementById('time-val').innerText = time.toLocaleTimeString();
-        document.getElementById('batt-val').innerText = battery;
+        // "Breadcrumbs" - get all points from feed
+        const breadcrumbs = messages.map(msg => [
+            parseFloat(msg.getElementsByTagName("latitude")[0].textContent),
+            parseFloat(msg.getElementsByTagName("longitude")[0].textContent)
+        ]).reverse();
 
-        // Calculate Distance & Speed
-        let totalDist = 0;
-        for(let i=0; i < messages.length - 1; i++) {
-            let p1 = L.latLng(messages[i].getElementsByTagName("latitude")[0].textContent, messages[i].getElementsByTagName("longitude")[0].textContent);
-            let p2 = L.latLng(messages[i+1].getElementsByTagName("latitude")[0].textContent, messages[i+1].getElementsByTagName("longitude")[0].textContent);
-            totalDist += p1.distanceTo(p2);
+        trackLine.setLatLngs(breadcrumbs);
+
+        // Latest Location (the newest message)
+        const latestMsg = messages[0]; 
+        const latestPos = [
+            parseFloat(latestMsg.getElementsByTagName("latitude")[0].textContent),
+            parseFloat(latestMsg.getElementsByTagName("longitude")[0].textContent)
+        ];
+
+        // Update Marker (Stays at latest pos even if you sleep)
+        if (!liveMarker) {
+            liveMarker = L.marker(latestPos).addTo(map).bindPopup("<b>Latest Position</b>").openPopup();
+        } else {
+            liveMarker.setLatLng(latestPos);
         }
-        document.getElementById('dist-val').innerText = (totalDist / 1000).toFixed(2) + " km";
 
-        // Simple Speed Estimate (last 2 points)
+        // Stats Update
+        document.getElementById('coord-val').innerText = `${latestPos[0].toFixed(5)}, ${latestPos[1].toFixed(5)}`;
+        const date = new Date(latestMsg.getElementsByTagName("dateTime")[0].textContent);
+        document.getElementById('time-val').innerText = date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        document.getElementById('batt-val').innerText = latestMsg.getElementsByTagName("batteryState")[0]?.textContent || "NORMAL";
+
+        // Distance & Speed
+        let totalDist = 0;
+        for(let i=0; i < breadcrumbs.length - 1; i++) {
+            totalDist += L.latLng(breadcrumbs[i]).distanceTo(L.latLng(breadcrumbs[i+1]));
+        }
+        document.getElementById('dist-val').innerText = (totalDist / 1000).toFixed(1) + " km";
+
         if (messages.length > 1) {
-            const p1 = L.latLng(messages[0].getElementsByTagName("latitude")[0].textContent, messages[0].getElementsByTagName("longitude")[0].textContent);
-            const p2 = L.latLng(messages[1].getElementsByTagName("latitude")[0].textContent, messages[1].getElementsByTagName("longitude")[0].textContent);
+            const p1 = L.latLng(breadcrumbs[breadcrumbs.length-1]);
+            const p2 = L.latLng(breadcrumbs[breadcrumbs.length-2]);
             const t1 = new Date(messages[0].getElementsByTagName("dateTime")[0].textContent);
             const t2 = new Date(messages[1].getElementsByTagName("dateTime")[0].textContent);
-            const hours = Math.abs(t1 - t2) / 36e5;
-            const km = p1.distanceTo(p2) / 1000;
-            document.getElementById('speed-val').innerText = hours > 0 ? (km / hours).toFixed(1) + " km/h" : "0.0 km/h";
+            const hrs = Math.abs(t1 - t2) / 36e5;
+            const speed = hrs > 0 ? (p1.distanceTo(p2) / 1000) / hrs : 0;
+            document.getElementById('speed-val').innerText = speed.toFixed(1) + " km/h";
         }
 
-    } catch (e) { console.error("Update error", e); }
+        if (firstLoad) {
+            map.setView(latestPos, 10);
+            firstLoad = false;
+        }
+
+    } catch (e) { console.error("Update Error:", e); }
 }
 
 setInterval(updateTrack, 60000);
 updateTrack();
+
 </script>
 </body>
 </html>
