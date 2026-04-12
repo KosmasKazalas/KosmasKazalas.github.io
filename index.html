@@ -13,7 +13,6 @@
         body { margin: 0; font-family: -apple-system, sans-serif; overflow: hidden; background: #f4f4f4; }
         #map { height: 100vh; width: 100vw; z-index: 1; }
 
-        /* --- UI Container --- */
         #ui-container {
             position: absolute;
             bottom: 20px;
@@ -21,78 +20,73 @@
             z-index: 1000;
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            width: calc(100% - 40px);
-            max-width: 600px;
-            pointer-events: none; /* Let clicks pass through to map unless on child */
+            gap: 8px;
+            width: auto; /* Shrink to fit content */
+            max-width: calc(100% - 40px);
+            pointer-events: none;
         }
 
         #ui-container > * { pointer-events: auto; }
 
-        /* --- Stats Box --- */
+        /* --- Stats Box (Compact Grid) --- */
         #stats-box {
             background: rgba(255, 255, 255, 0.95);
-            padding: 12px;
+            padding: 10px 12px;
             border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            backdrop-filter: blur(5px);
+            grid-template-columns: auto auto; /* Tight fit */
+            column-gap: 15px;
+            row-gap: 8px;
+            backdrop-filter: blur(8px);
+            width: fit-content;
         }
 
-        /* --- Elevation Drawer --- */
+        /* --- Elevation Drawer (Lag-free Animation) --- */
         #elevation-drawer {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-            backdrop-filter: blur(5px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            backdrop-filter: blur(8px);
             overflow: hidden;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            max-height: 44px; /* Height of the button only */
-            width: 160px; /* Collapsed width */
+            width: 160px;
+            transition: width 0.25s ease;
         }
 
         #elevation-drawer.expanded {
-            max-height: 250px;
-            width: 100%; /* Take full container width when expanded */
+            width: 100%; /* Expands within the max-width of UI container */
         }
 
         #toggle-btn {
             width: 100%;
-            height: 44px;
+            height: 40px;
             background: #007bff;
             color: white;
             border: none;
             font-weight: bold;
-            font-size: 12px;
+            font-size: 11px;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
             text-transform: uppercase;
         }
 
-        #toggle-btn:hover { background: #0056b3; }
-
-        #chart-container {
-            padding: 10px;
-            height: 180px;
-            opacity: 0;
-            transition: opacity 0.2s ease;
+        #chart-wrap {
+            height: 0;
+            overflow: hidden;
+            transition: height 0.3s ease-out;
         }
 
-        #elevation-drawer.expanded #chart-container { opacity: 1; }
+        #elevation-drawer.expanded #chart-wrap {
+            height: 180px;
+        }
 
-        .stat-item { border-left: 3px solid #007bff; padding-left: 8px; }
-        .label { font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
-        .value { font-size: 14px; color: #111; font-weight: 800; display: block; }
+        .stat-item { border-left: 2px solid #007bff; padding-left: 8px; }
+        .label { font-size: 8px; color: #777; text-transform: uppercase; font-weight: 600; }
+        .value { font-size: 13px; color: #111; font-weight: 800; display: block; white-space: nowrap; }
 
-        /* Mobile Adjustments */
+        /* Mobile specific sizing */
         @media (max-width: 480px) {
-            #ui-container { bottom: 10px; left: 10px; width: calc(100% - 20px); }
-            #elevation-drawer.expanded { max-height: 200px; }
+            #ui-container { left: 10px; bottom: 10px; }
+            #elevation-drawer.expanded #chart-wrap { height: 150px; }
         }
     </style>
 </head>
@@ -102,196 +96,125 @@
 
 <div id="ui-container">
     <div id="elevation-drawer">
-        <button id="toggle-btn" onclick="toggleElevation()">
-            📈 <span>Elevation Profile</span>
-        </button>
-        <div id="chart-container">
-            <canvas id="elevationChart"></canvas>
+        <button id="toggle-btn" onclick="toggleElevation()">📈 Elevation Profile</button>
+        <div id="chart-wrap">
+            <div style="height:100%; padding:10px;">
+                <canvas id="elevationChart"></canvas>
+            </div>
         </div>
     </div>
 
     <div id="stats-box">
         <div class="stat-item"><span class="label">Speed (est)</span><span id="speed-val" class="value">-- km/h</span></div>
-        <div class="stat-item"><span class="label">Distance Covered</span><span id="dist-val" class="value">-- km</span></div>
-        <div class="stat-item" style="grid-column: span 2;"><span class="label">Latest Coordinates</span><span id="coord-val" class="value">Waiting for GPS...</span></div>
+        <div class="stat-item"><span class="label">Distance</span><span id="dist-val" class="value">-- km</span></div>
+        <div class="stat-item" style="grid-column: span 2;"><span class="label">Latest Coordinates</span><span id="coord-val" class="value">Syncing...</span></div>
         <div class="stat-item"><span class="label">Last Update</span><span id="time-val" class="value">--:--</span></div>
-        <div class="stat-item"><span class="label">Battery Status</span><span id="batt-val" class="value">--</span></div>
+        <div class="stat-item"><span class="label">Battery</span><span id="batt-val" class="value">--</span></div>
     </div>
 </div>
 
 <script>
-// --- UI Toggle Function ---
 function toggleElevation() {
-    const drawer = document.getElementById('elevation-drawer');
-    const btnText = document.querySelector('#toggle-btn span');
-    drawer.classList.toggle('expanded');
-    
-    if(drawer.classList.contains('expanded')) {
-        btnText.innerText = "Close Profile";
-    } else {
-        btnText.innerText = "Elevation Profile";
-    }
+    const drw = document.getElementById('elevation-drawer');
+    const btn = document.getElementById('toggle-btn');
+    drw.classList.toggle('expanded');
+    btn.innerText = drw.classList.contains('expanded') ? "✕ Close Profile" : "📈 Elevation Profile";
 }
 
-// --- 1. Map Setup ---
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
 const map = L.map('map', { zoomControl: true, layers: [satellite] });
 L.control.layers({ "Satellite": satellite, "Street": street }).addTo(map);
 
-let liveMarker;
-let hoverMarker = L.circleMarker([0,0], { radius: 7, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3, zIndexOffset: 2000 }).addTo(map);
+let liveMarker, hoverMarker = L.circleMarker([0,0], { radius: 6, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3 }).addTo(map);
 let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.7 }).addTo(map);
 let breadcrumbLine = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.9 }).addTo(map);
-let elevationChart;
-let routeData = [];
+let elevationChart, routeData = [];
 
 const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
-// --- 2. Load KML ---
-fetch("route.kml")
-    .then(res => res.text())
-    .then(kmlText => {
-        const parser = new DOMParser();
-        const kml = parser.parseFromString(kmlText, "text/xml");
-        const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
-        
-        let accumulatedDist = 0;
-        routeData = coordsStr.split(/\s+/).map((p, i, arr) => {
-            const [lng, lat, ele] = p.split(",").map(Number);
-            if (i > 0) {
-                const prev = arr[i-1].split(",").map(Number);
-                accumulatedDist += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
-            }
-            return { lat, lng, ele, dist: (accumulatedDist / 1000).toFixed(1) };
-        });
-
-        if(routeData.length > 0) {
-            plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
-            initChart();
-            map.fitBounds(plannedRouteLine.getBounds(), { padding: [20, 20] });
+fetch("route.kml").then(r => r.text()).then(txt => {
+    const kml = new DOMParser().parseFromString(txt, "text/xml");
+    const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
+    let acc = 0;
+    routeData = coordsStr.split(/\s+/).map((p, i, arr) => {
+        const [lng, lat, ele] = p.split(",").map(Number);
+        if (i > 0) {
+            const prev = arr[i-1].split(",").map(Number);
+            acc += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
         }
+        return { lat, lng, ele, dist: (acc / 1000).toFixed(1) };
     });
+    plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
+    initChart();
+    map.fitBounds(plannedRouteLine.getBounds(), { padding: [20, 20] });
+});
 
 function initChart() {
     const ctx = document.getElementById('elevationChart').getContext('2d');
-    const elevations = routeData.map(p => p.ele);
-    const distances = routeData.map(p => p.dist);
-    const maxEle = Math.max(...elevations);
-    
+    const elevs = routeData.map(p => p.ele);
+    const maxE = Math.max(...elevs);
     elevationChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: distances,
-            datasets: [{
-                data: elevations,
-                borderColor: '#ff4444',
-                backgroundColor: 'rgba(255, 68, 68, 0.1)',
-                fill: true,
-                pointRadius: 0,
-                borderWidth: 2,
-                tension: 0.1
-            }]
+            labels: routeData.map(p => p.dist),
+            datasets: [{ data: elevs, borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.1)', fill: true, pointRadius: 0, borderWidth: 2, tension: 0.1 }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
+            responsive: true, maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
-            scales: { 
-                x: { display: false }, 
-                y: { 
-                    min: 0, 
-                    suggestedMax: maxEle + 20,
-                    ticks: { color: '#666', font: { size: 9 }, stepSize: Math.ceil(maxEle / 4) } 
-                } 
-            },
-            plugins: { 
-                legend: { display: false },
-                tooltip: {
-                    enabled: true,
-                    displayColors: false,
-                    callbacks: {
-                        title: (items) => `Distance: ${items[0].label} km`,
-                        label: (context) => `Elevation: ${context.parsed.y} m`
-                    }
-                }
-            },
-            onHover: (e, el) => {
-                if (el.length > 0) {
-                    const index = el[0].index;
-                    const p = routeData[index];
-                    hoverMarker.setLatLng([p.lat, p.lng]);
-                }
-            }
+            scales: { x: { display: false }, y: { min: 0, suggestedMax: maxE + 10, ticks: { size: 9 } } },
+            plugins: { legend: { display: false }, tooltip: { enabled: true, callbacks: { title: (i) => i[0].label + ' km', label: (c) => c.parsed.y + ' m' } } },
+            onHover: (e, el) => { if (el.length > 0) hoverMarker.setLatLng([routeData[el[0].index].lat, routeData[el[0].index].lng]); }
         }
     });
 }
 
-// --- 3. Live Tracking ---
 async function updateTrack() {
     try {
         const res = await fetch(SPOT_URL);
-        const text = await res.text();
-        const xml = new DOMParser().parseFromString(text, "text/xml");
+        const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
         const messages = Array.from(xml.getElementsByTagName("message"));
-        
-        if (messages.length === 0) {
-            document.getElementById('coord-val').innerText = "No data in feed";
-            return;
-        }
+        if (!messages.length) return;
 
-        const allPoints = messages.map(msg => ({
-            lat: parseFloat(msg.getElementsByTagName("latitude")[0].textContent),
-            lng: parseFloat(msg.getElementsByTagName("longitude")[0].textContent),
-            time: new Date(msg.getElementsByTagName("dateTime")[0].textContent),
-            battery: msg.getElementsByTagName("batteryState")[0]?.textContent || "GOOD"
+        const all = messages.map(m => ({
+            lat: parseFloat(m.getElementsByTagName("latitude")[0].textContent),
+            lng: parseFloat(m.getElementsByTagName("longitude")[0].textContent),
+            time: new Date(m.getElementsByTagName("dateTime")[0].textContent),
+            batt: m.getElementsByTagName("batteryState")[0]?.textContent || "GOOD"
         })).reverse();
 
-        const latest = allPoints[allPoints.length - 1];
+        const latst = all[all.length - 1];
+        if (!liveMarker) liveMarker = L.marker([latst.lat, latst.lng]).addTo(map);
+        else liveMarker.setLatLng([latst.lat, latst.lng]);
 
-        if (!liveMarker) {
-            liveMarker = L.marker([latest.lat, latest.lng]).addTo(map).bindPopup("Latest Position");
-        } else {
-            liveMarker.setLatLng([latest.lat, latest.lng]);
-        }
+        document.getElementById('coord-val').innerText = `${latst.lat.toFixed(4)}, ${latst.lng.toFixed(4)}`;
+        document.getElementById('time-val').innerText = latst.time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        document.getElementById('batt-val').innerText = latst.batt;
 
-        document.getElementById('coord-val').innerText = `${latest.lat.toFixed(5)}, ${latest.lng.toFixed(5)}`;
-        document.getElementById('time-val').innerText = latest.time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        document.getElementById('batt-val').innerText = latest.battery;
-
-        const startPoint = L.latLng(37.020374, 22.143312); 
-        let hasReachedStart = false;
-        
-        const validHistory = allPoints.filter(p => {
-            const distFromStart = L.latLng(p.lat, p.lng).distanceTo(startPoint);
-            if (distFromStart < 2000) hasReachedStart = true; 
-            return hasReachedStart;
+        const start = L.latLng(37.0203, 22.1433); 
+        let started = false;
+        const valid = all.filter(p => {
+            if (L.latLng(p.lat, p.lng).distanceTo(start) < 2000) started = true;
+            return started;
         });
 
-        if (validHistory.length > 0) {
-            breadcrumbLine.setLatLngs(validHistory.map(p => [p.lat, p.lng]));
-            let totalDist = 0;
-            for(let i=0; i < validHistory.length - 1; i++) {
-                totalDist += L.latLng(validHistory[i].lat, validHistory[i].lng)
-                              .distanceTo(L.latLng(validHistory[i+1].lat, validHistory[i+1].lng));
-            }
-            document.getElementById('dist-val').innerText = (totalDist / 1000).toFixed(1) + " km";
+        if (valid.length) {
+            breadcrumbLine.setLatLngs(valid.map(p => [p.lat, p.lng]));
+            let d = 0;
+            for(let i=0; i<valid.length-1; i++) d += L.latLng(valid[i]).distanceTo(L.latLng(valid[i+1]));
+            document.getElementById('dist-val').innerText = (d/1000).toFixed(1) + " km";
         } else {
-            breadcrumbLine.setLatLngs([]);
-            document.getElementById('dist-val').innerText = "0.0 km (Not Started)";
+            document.getElementById('dist-val').innerText = "0.0 km";
         }
 
-        if (allPoints.length > 1) {
-            const p1 = allPoints[allPoints.length - 1];
-            const p2 = allPoints[allPoints.length - 2];
+        if (all.length > 1) {
+            const p1 = all[all.length-1], p2 = all[all.length-2];
             const hrs = Math.abs(p1.time - p2.time) / 36e5;
             const km = L.latLng(p1.lat, p1.lng).distanceTo(L.latLng(p2.lat, p2.lng)) / 1000;
-            document.getElementById('speed-val').innerText = (hrs > 0 && hrs < 2) ? (km/hrs).toFixed(1) + " km/h" : "0.0 km/h";
+            document.getElementById('speed-val').innerText = (hrs > 0 && hrs < 2.5) ? (km/hrs).toFixed(1) + " km/h" : "0.0 km/h";
         }
-
-    } catch (e) { 
-        console.error("Update Error:", e);
-    }
+    } catch (e) { console.error(e); }
 }
 setInterval(updateTrack, 60000);
 updateTrack();
