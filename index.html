@@ -94,7 +94,6 @@ const map = L.map('map', {
 
 const infoLayer = L.layerGroup().addTo(map);
 
-// Vertical indicator on map
 const hoverCircle = L.circleMarker([0,0], {
     radius: 6,
     fillColor: "#ff4444",
@@ -158,7 +157,6 @@ fetch("route.kml").then(r => r.text()).then(txt => {
     const latlngs = routeData.map(p => [p.lat, p.lng]);
     plannedRouteLine.setLatLngs(latlngs);
 
-    // Fixed: Changed fillColor to 'transparent' and weight to 40 for a large invisible hit area
     routeFill = L.polyline(latlngs, {
         color: 'transparent',
         weight: 40,
@@ -190,7 +188,12 @@ function initChart() {
             maintainAspectRatio: false,
             interaction: { intersect: false, mode: 'index' },
             scales: { 
-                x: { display: true, title: { display: false } }, // Removed X-axis label
+                x: { 
+                    display: true, 
+                    title: { display: false },
+                    ticks: { display: false }, // Distance numbers removed
+                    grid: { display: false }
+                },
                 y: { min: 0, title: { display: true, text: 'Elevation (m)' } }
             },
             plugins: { 
@@ -247,8 +250,6 @@ function attachMapEvents() {
             const meta = chartInstance.getDatasetMeta(0);
             if (meta && meta.data[closestIdx]) {
                 const point = meta.data[closestIdx];
-                const rect = chartInstance.canvas.getBoundingClientRect();
-                
                 chartInstance.tooltip.setActiveElements([{ datasetIndex: 0, index: closestIdx }], {
                     x: point.x,
                     y: point.y
