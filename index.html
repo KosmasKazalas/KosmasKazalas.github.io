@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -41,12 +42,23 @@
         .stat-item { border-left: 2px solid #007bff; padding-left: 6px; }
         .label { font-size: 8px; color: #666; text-transform: uppercase; font-weight: bold; }
         .value { font-size: 12px; color: #000; font-weight: 800; display: block; }
+
+        /* Icon Styling */
+        .custom-marker {
+            display: flex; justify-content: center; align-items: center;
+            border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+        }
+        .bike-live { background: #007bff; color: white; font-size: 16px; width: 36px !important; height: 36px !important; margin-left: -18px !important; margin-top: -18px !important; }
+        .poi-camp { background: #2e7d32; color: white; }
+        .poi-water { background: #0288d1; color: white; }
+        .poi-shop { background: #ef6c00; color: white; }
+        .poi-hab { background: #795548; color: white; }
+        .poi-default { background: #616161; color: white; }
     </style>
 </head>
 <body>
 
 <div id="map"></div>
-
 <div id="stats-box">
     <div class="stat-item"><span class="label">Speed</span><span id="speed-val" class="value">-- km/h</span></div>
     <div class="stat-item"><span class="label">Distance</span><span id="dist-val" class="value">-- km</span></div>
@@ -62,7 +74,6 @@
 <button id="toggle-btn" onclick="toggleElevation()">📈 Elevation</button>
 
 <script>
-// UI Control
 function toggleElevation() {
     const drw = document.getElementById('elevation-drawer');
     const btn = document.getElementById('toggle-btn');
@@ -71,7 +82,6 @@ function toggleElevation() {
     btn.style.bottom = drw.classList.contains('expanded') ? "210px" : "20px";
 }
 
-// Map Initialization
 const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
 const labels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}');
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
@@ -81,50 +91,63 @@ const map = L.map('map', { zoomControl: false, layers: [hybrid] }).setView([37.5
 const infoLayer = L.layerGroup().addTo(map);
 
 L.control.zoom({ position: 'topright' }).addTo(map);
-L.control.layers({ "Hybrid Satellite": hybrid, "Street Map": street }, { "Infopoints": infoLayer }, { position: 'topright' }).addTo(map);
+L.control.layers({ "Hybrid Satellite": hybrid, "Street Map": street }, { "Waypoints": infoLayer }, { position: 'topright' }).addTo(map);
 
-let liveMarker, hoverMarker = L.circleMarker([0,0], { radius: 6, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3 }).addTo(map);
-let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.7 }).addTo(map);
-let breadcrumbLine = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.9 }).addTo(map);
-let elevationChart, routeData = [];
+function getPoiIcon(sym, name) {
+    let icon = "fa-location-dot";
+    let css = "poi-default";
+    
+    const s = sym ? sym.toLowerCase() : "";
+    const n = name ? name.toLowerCase() : "";
 
-// Load Waypoints (Infopoints) from GPX
-fetch("Cross PeloponneseFINAL.gpx")
-    .then(r => r.text())
-    .then(txt => {
-        const gpx = new DOMParser().parseFromString(txt, "text/xml");
-        const wpts = gpx.getElementsByTagName("wpt");
-        for (let w of wpts) {
-            const lat = parseFloat(w.getAttribute("lat"));
-            const lon = parseFloat(w.getAttribute("lon"));
-            const name = w.getElementsByTagName("name")[0]?.textContent || "Waypoint";
-            L.marker([lat, lon]).bindPopup(`<b>${name}</b>`).addTo(infoLayer);
-        }
-    }).catch(e => console.log("GPX Waypoints failed to load, skipping."));
+    if (s.includes("camp") || n.includes("camp")) { icon = "fa-tent"; css = "poi-camp"; }
+    else if (s.includes("water") || n.includes("water")) { icon = "fa-droplet"; css = "poi-water"; }
+    else if (s.includes("store") || s.includes("convenience") || n.includes("market")) { icon = "fa-cart-shopping"; css = "poi-shop"; }
+    else if (n.includes("hab") || n.includes("hike")) { icon = "fa-person-walking-arrow-right"; css = "poi-hab"; }
 
-// Load Route from KML (Using the route.kml for elevation data)
-fetch("route.kml")
-    .then(r => r.text())
-    .then(txt => {
-        const kml = new DOMParser().parseFromString(txt, "text/xml");
-        const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
-        let accDist = 0;
-        routeData = coordsStr.split(/\s+/).map((p, i, arr) => {
-            const [lng, lat, ele] = p.split(",").map(Number);
-            if (i > 0) {
-                const prev = arr[i-1].split(",").map(Number);
-                accDist += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
-            }
-            return { lat, lng, ele, dist: (accDist / 1000).toFixed(1) };
-        });
-        plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
-        initChart();
-        map.fitBounds(plannedRouteLine.getBounds(), { padding: [40, 40] });
+    return L.divIcon({
+        html: `<i class="fa-solid ${icon}"></i>`,
+        className: `custom-marker ${css}`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
     });
+}
+
+// Load Waypoints
+fetch("Cross PeloponneseFINAL.gpx").then(r => r.text()).then(txt => {
+    const gpx = new DOMParser().parseFromString(txt, "text/xml");
+    const wpts = gpx.getElementsByTagName("wpt");
+    for (let w of wpts) {
+        const lat = parseFloat(w.getAttribute("lat"));
+        const lon = parseFloat(w.getAttribute("lon"));
+        const name = w.getElementsByTagName("name")[0]?.textContent || "";
+        const sym = w.getElementsByTagName("sym")[0]?.textContent || "";
+        L.marker([lat, lon], { icon: getPoiIcon(sym, name) }).bindPopup(`<b>${name}</b>`).addTo(infoLayer);
+    }
+});
+
+// Route & Elevation
+let routeData = [];
+let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.7 }).addTo(map);
+fetch("route.kml").then(r => r.text()).then(txt => {
+    const kml = new DOMParser().parseFromString(txt, "text/xml");
+    const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
+    let accDist = 0;
+    routeData = coordsStr.split(/\s+/).map((p, i, arr) => {
+        const [lng, lat, ele] = p.split(",").map(Number);
+        if (i > 0) {
+            const prev = arr[i-1].split(",").map(Number);
+            accDist += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
+        }
+        return { lat, lng, ele, dist: (accDist / 1000).toFixed(1) };
+    });
+    plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
+    initChart();
+});
 
 function initChart() {
     const ctx = document.getElementById('elevationChart').getContext('2d');
-    elevationChart = new Chart(ctx, {
+    new Chart(ctx, {
         type: 'line',
         data: {
             labels: routeData.map(p => p.dist),
@@ -133,37 +156,33 @@ function initChart() {
         options: {
             responsive: true, maintainAspectRatio: false,
             scales: { x: { display: false }, y: { min: 0 } },
-            plugins: { legend: { display: false } },
-            onHover: (e, el) => {
-                if (el.length > 0) {
-                    const idx = el[0].index;
-                    hoverMarker.setLatLng([routeData[idx].lat, routeData[idx].lng]);
-                }
-            }
+            plugins: { legend: { display: false } }
         }
     });
 }
 
+let liveMarker;
 async function updateTrack() {
     try {
         const res = await fetch("https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml");
         const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
-        const msgs = Array.from(xml.getElementsByTagName("message"));
-        if (!msgs.length) return;
+        const msg = xml.getElementsByTagName("message")[0];
+        if (!msg) return;
 
-        const latest = msgs[0];
-        const lat = parseFloat(latest.getElementsByTagName("latitude")[0].textContent);
-        const lng = parseFloat(latest.getElementsByTagName("longitude")[0].textContent);
-        const time = new Date(latest.getElementsByTagName("dateTime")[0].textContent);
-        const batt = latest.getElementsByTagName("batteryState")[0]?.textContent || "OK";
+        const lat = parseFloat(msg.getElementsByTagName("latitude")[0].textContent);
+        const lng = parseFloat(msg.getElementsByTagName("longitude")[0].textContent);
+        const time = new Date(msg.getElementsByTagName("dateTime")[0].textContent);
+        const batt = msg.getElementsByTagName("batteryState")[0]?.textContent || "OK";
 
-        if (!liveMarker) liveMarker = L.marker([lat, lng]).addTo(map);
+        const liveIcon = L.divIcon({ html: '<i class="fa-solid fa-bicycle"></i>', className: 'custom-marker bike-live' });
+
+        if (!liveMarker) liveMarker = L.marker([lat, lng], { icon: liveIcon }).addTo(map);
         else liveMarker.setLatLng([lat, lng]);
 
         document.getElementById('coord-val').innerText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
         document.getElementById('time-val').innerText = time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         document.getElementById('batt-val').innerText = batt;
-    } catch (e) { console.error("Spot update failed", e); }
+    } catch (e) { console.error(e); }
 }
 
 setInterval(updateTrack, 60000);
