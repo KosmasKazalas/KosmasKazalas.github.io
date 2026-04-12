@@ -149,42 +149,57 @@ fetch("route.kml").then(r => r.text()).then(txt => {
 // CHART
 function initChart() {
     const ctx = document.getElementById('elevationChart').getContext('2d');
-
+    
     chartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: routeData.map(p => p.dist),
+            labels: routeData.map(p => parseFloat(p.dist)),
             datasets: [{
                 data: routeData.map(p => p.ele),
                 borderColor: '#ff4444',
-                backgroundColor: 'rgba(255,68,68,0.15)',
+                backgroundColor: 'rgba(255, 68, 68, 0.15)',
                 fill: true,
-                pointRadius: 0
+                pointRadius: 0,
+                borderWidth: 3,
+                tension: 0.1
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             interaction: { intersect: false, mode: 'index' },
-            scales: {
-                x: {
+            scales: { 
+                x: { 
+                    display: true, 
+                    title: { display: false }, // Removed "Distance (km)" label
                     ticks: {
-                        callback: (val) => (val % 50 === 0 ? val + " km" : ""),
-                        autoSkip: false
-                    },
-                    title: { display: false }
+                        stepSize: 50, // Force marks every 50km
+                        callback: function(value) {
+                            return value % 50 === 0 ? value : null;
+                        }
+                    }
                 },
-                y: {
-                    title: { display: true, text: "Elevation (m)" }
+                y: { min: 0, title: { display: true, text: 'Elevation (m)' } }
+            },
+            plugins: { 
+                legend: { display: false },
+                tooltip: { 
+                    mode: 'index', 
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            return `Elevation: ${context.parsed.y} m`;
+                        },
+                        title: function(context) {
+                            return `Distance: ${context[0].label} km`;
+                        }
+                    }
                 }
             },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        title: (ctx) => ctx[0].label.toFixed(1) + " km",
-                        label: (ctx) => ctx.parsed.y + " m"
-                    }
+            onHover: (event, elements) => {
+                if (elements.length > 0) {
+                    const idx = elements[0].index;
+                    highlightRoutePoint(idx);
                 }
             }
         }
@@ -210,8 +225,9 @@ async function updateTrack() {
     });
 
     if (!liveMarker) {
-        liveMarker = L.marker([lat, lng], { icon }).addTo(map)
-            .bindPopup("<b>KOSMAS</b>");
+        liveMarker = L.marker([lat, lng], { icon: liveIcon })
+            .bindPopup("<b>KOSMAS</b>") // Added popup name
+            .addTo(map);
     } else {
         liveMarker.setLatLng([lat, lng]);
     }
