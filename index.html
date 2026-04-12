@@ -97,7 +97,7 @@
     <div class="stat-item"><span class="label">Speed</span><span id="speed-val" class="value">-- km/h</span></div>
     <div class="stat-item"><span class="label">Distance</span><span id="dist-val" class="value">-- km</span></div>
     <div class="stat-item" style="grid-column: span 2;"><span class="label">Latest Coordinates</span><span id="coord-val" class="value">Syncing...</span></div>
-    <div class="stat-item"><span class="label">Update</span><span id="time-val" class="value">--:--</span></div>
+    <div class="stat-item"><span class="label">Last Update</span><span id="time-val" class="value">--:--</span></div>
     <div class="stat-item"><span class="label">Battery</span><span id="batt-val" class="value">--</span></div>
 </div>
 
@@ -117,19 +117,14 @@ function toggleElevation() {
     btn.innerHTML = drw.classList.contains('expanded') ? "✕ Close" : "📈 Elevation";
 }
 
-// --- NEW MAP LAYERS (Hybrid includes labels) ---
+// Map Layers with Hybrid Labels
 const satelliteHybrid = L.layerGroup([
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
     L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}')
 ]);
-
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
-const map = L.map('map', { 
-    zoomControl: false, 
-    layers: [satelliteHybrid] // Defaulting to Hybrid
-});
-
+const map = L.map('map', { zoomControl: false, layers: [satelliteHybrid] });
 L.control.zoom({ position: 'topright' }).addTo(map);
 L.control.layers({ "Hybrid Satellite": satelliteHybrid, "Street Map": street }, null, { position: 'topright' }).addTo(map);
 
@@ -193,7 +188,10 @@ async function updateTrack() {
         else liveMarker.setLatLng([cur.lat, cur.lng]);
 
         document.getElementById('coord-val').innerText = `${cur.lat.toFixed(4)}, ${cur.lng.toFixed(4)}`;
-        document.getElementById('time-val').innerText = cur.time.toLocaleString([], { hour: '2-digit', minute: '2-digit' });
+        
+        // --- RESTORED DATE FORMATTING HERE ---
+        document.getElementById('time-val').innerText = cur.time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        
         document.getElementById('batt-val').innerText = cur.batt;
 
         const startPos = L.latLng(37.0203, 22.1433); 
