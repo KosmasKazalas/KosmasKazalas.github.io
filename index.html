@@ -43,28 +43,39 @@
         .label { font-size: 8px; color: #666; text-transform: uppercase; font-weight: bold; }
         .value { font-size: 12px; color: #000; font-weight: 800; display: block; }
 
-        /* --- Live Marker: Upside Down Triangle --- */
-        .bike-live-container {
-            width: 40px !important; height: 40px !important;
-            margin-left: -20px !important; margin-top: -40px !important; /* Bottom tip at coord */
-            display: flex; flex-direction: column; align-items: center;
-        }
-
-        .triangle-marker {
-            width: 0; height: 0;
-            border-left: 20px solid transparent;
-            border-right: 20px solid transparent;
-            border-top: 35px solid #007bff; /* The color of your marker */
-            filter: drop-shadow(0 4px 4px rgba(0,0,0,0.5));
+        /* --- New Centered Pin Style --- */
+        .bike-pin {
+            width: 44px;
+            height: 54px;
             position: relative;
+            filter: drop-shadow(0 3px 6px rgba(0,0,0,0.4));
+        }
+        
+        /* The Pin Shape */
+        .pin-svg {
+            position: absolute;
+            fill: #007bff;
+            stroke: white;
+            stroke-width: 2;
         }
 
-        .bike-live-container i {
-            position: absolute; top: -30px; /* Positions bike inside triangle */
-            color: white; font-size: 16px;
+        /* The Bike Icon Container */
+        .bike-inner {
+            position: absolute;
+            top: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+            z-index: 2;
         }
 
-        /* --- POI Styles --- */
+        /* POI Styles */
         .custom-marker {
             display: flex; justify-content: center; align-items: center;
             border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4);
@@ -141,9 +152,20 @@ fetch("Cross PeloponneseFINAL.gpx").then(r => r.text()).then(txt => {
 });
 
 let liveMarker;
-const liveIcon = L.divIcon({
-    html: '<div class="triangle-marker"><i class="fa-solid fa-bicycle"></i></div>',
-    className: 'bike-live-container'
+const kosmasIcon = L.divIcon({
+    html: `
+        <div class="bike-pin">
+            <svg class="pin-svg" viewBox="0 0 44 54" width="44" height="54">
+                <path d="M22 0C9.8 0 0 9.8 0 22c0 14 22 32 22 32s22-18 22-32C44 9.8 34.2 0 22 0z"/>
+            </svg>
+            <div class="bike-inner">
+                <i class="fa-solid fa-bicycle"></i>
+            </div>
+        </div>
+    `,
+    className: '',
+    iconSize: [44, 54],
+    iconAnchor: [22, 54] // The tip of the triangle is at the bottom center
 });
 
 async function updateTrack() {
@@ -158,7 +180,7 @@ async function updateTrack() {
         const time = new Date(msg.getElementsByTagName("dateTime")[0].textContent);
 
         if (!liveMarker) {
-            liveMarker = L.marker([lat, lng], { icon: liveIcon }).addTo(map).bindPopup('<b>KOSMAS</b>');
+            liveMarker = L.marker([lat, lng], { icon: kosmasIcon }).addTo(map).bindPopup('<b>KOSMAS</b>');
         } else {
             liveMarker.setLatLng([lat, lng]);
         }
