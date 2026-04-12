@@ -10,8 +10,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        body { margin: 0; font-family: -apple-system, sans-serif; overflow: hidden; background: #000; }
+        body { margin: 0; font-family: -apple-system, sans-serif; overflow: hidden; background: #1a1a1a; }
         #map { height: 100vh; width: 100vw; z-index: 1; }
+        
         #stats-box {
             position: absolute; top: 15px; left: 15px; z-index: 1000;
             background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 8px;
@@ -19,22 +20,24 @@
             grid-template-columns: auto auto; column-gap: 12px; row-gap: 6px;
             backdrop-filter: blur(8px); width: fit-content;
         }
+
+        #elevation-drawer {
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 0;
+            z-index: 1001; background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px); transition: height 0.3s ease;
+            overflow: hidden; border-top: 1px solid rgba(0,0,0,0.1);
+        }
+        #elevation-drawer.expanded { height: 200px; }
+        #chart-wrap { width: 100%; height: 100%; padding: 15px; box-sizing: border-box; }
+
         #toggle-btn {
             position: absolute; bottom: 20px; left: 15px; z-index: 1002;
             height: 40px; padding: 0 15px; background: #007bff; color: white;
             border: none; border-radius: 20px; font-weight: bold; font-size: 11px;
             cursor: pointer; text-transform: uppercase; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            display: flex; align-items: center; gap: 8px;
+            transition: bottom 0.3s ease;
         }
-        #elevation-drawer {
-            position: absolute; bottom: 0; left: 0; width: 100%; height: 0;
-            z-index: 1001; background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px); transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            overflow: hidden; border-top: 1px solid rgba(0,0,0,0.1);
-        }
-        #elevation-drawer.expanded { height: 200px; }
-        #chart-wrap { width: 100%; height: 100%; padding: 15px; box-sizing: border-box; }
-        #elevation-drawer.expanded ~ #toggle-btn { bottom: 210px; }
+
         .stat-item { border-left: 2px solid #007bff; padding-left: 6px; }
         .label { font-size: 8px; color: #666; text-transform: uppercase; font-weight: bold; }
         .value { font-size: 12px; color: #000; font-weight: 800; display: block; }
@@ -43,6 +46,7 @@
 <body>
 
 <div id="map"></div>
+
 <div id="stats-box">
     <div class="stat-item"><span class="label">Speed</span><span id="speed-val" class="value">-- km/h</span></div>
     <div class="stat-item"><span class="label">Distance</span><span id="dist-val" class="value">-- km</span></div>
@@ -58,81 +62,110 @@
 <button id="toggle-btn" onclick="toggleElevation()">📈 Elevation</button>
 
 <script>
+// UI Control
 function toggleElevation() {
     const drw = document.getElementById('elevation-drawer');
     const btn = document.getElementById('toggle-btn');
     drw.classList.toggle('expanded');
     btn.innerHTML = drw.classList.contains('expanded') ? "✕ Close" : "📈 Elevation";
+    btn.style.bottom = drw.classList.contains('expanded') ? "210px" : "20px";
 }
 
-const satelliteHybrid = L.layerGroup([
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
-    L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}')
-]);
+// Map Initialization
+const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
+const labels = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}');
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
-const map = L.map('map', { zoomControl: false, layers: [satelliteHybrid] });
+const hybrid = L.layerGroup([satellite, labels]);
+const map = L.map('map', { zoomControl: false, layers: [hybrid] }).setView([37.5, 22.3], 8);
 const infoLayer = L.layerGroup().addTo(map);
 
 L.control.zoom({ position: 'topright' }).addTo(map);
-L.control.layers(
-    { "Hybrid Satellite": satelliteHybrid, "Street Map": street },
-    { "Infopoints": infoLayer },
-    { position: 'topright' }
-).addTo(map);
+L.control.layers({ "Hybrid Satellite": hybrid, "Street Map": street }, { "Infopoints": infoLayer }, { position: 'topright' }).addTo(map);
 
-let liveMarker, hoverMarker = L.circleMarker([0,0], { radius: 6, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3, zIndexOffset: 2000 }).addTo(map);
+let liveMarker, hoverMarker = L.circleMarker([0,0], { radius: 6, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3 }).addTo(map);
 let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.7 }).addTo(map);
 let breadcrumbLine = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.9 }).addTo(map);
-let routeData = [];
+let elevationChart, routeData = [];
 
-// Load GPX for Waypoints (Infopoints)
-fetch("Cross PeloponneseFINAL.gpx").then(r => r.text()).then(txt => {
-    const gpx = new DOMParser().parseFromString(txt, "text/xml");
-    const wpts = gpx.getElementsByTagName("wpt");
-    for (let w of wpts) {
-        const lat = w.getAttribute("lat"), lon = w.getAttribute("lon");
-        const name = w.getElementsByTagName("name")[0]?.textContent || "Point";
-        const sym = w.getElementsByTagName("sym")[0]?.textContent || "";
-        L.marker([lat, lon]).bindPopup(`<b>${name}</b><br>${sym}`).addTo(infoLayer);
-    }
-});
+// Load Waypoints (Infopoints) from GPX
+fetch("Cross PeloponneseFINAL.gpx")
+    .then(r => r.text())
+    .then(txt => {
+        const gpx = new DOMParser().parseFromString(txt, "text/xml");
+        const wpts = gpx.getElementsByTagName("wpt");
+        for (let w of wpts) {
+            const lat = parseFloat(w.getAttribute("lat"));
+            const lon = parseFloat(w.getAttribute("lon"));
+            const name = w.getElementsByTagName("name")[0]?.textContent || "Waypoint";
+            L.marker([lat, lon]).bindPopup(`<b>${name}</b>`).addTo(infoLayer);
+        }
+    }).catch(e => console.log("GPX Waypoints failed to load, skipping."));
 
-// Load KML for Route
-fetch("Cross Peloponnese 2026.kml").then(r => r.text()).then(txt => {
-    const kml = new DOMParser().parseFromString(txt, "text/xml");
-    const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
-    routeData = coordsStr.split(/\s+/).map(p => {
-        const [lng, lat] = p.split(",").map(Number);
-        return { lat, lng, ele: 0 }; // Elevations are not in this KML, logic remains for structure
+// Load Route from KML (Using the route.kml for elevation data)
+fetch("route.kml")
+    .then(r => r.text())
+    .then(txt => {
+        const kml = new DOMParser().parseFromString(txt, "text/xml");
+        const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
+        let accDist = 0;
+        routeData = coordsStr.split(/\s+/).map((p, i, arr) => {
+            const [lng, lat, ele] = p.split(",").map(Number);
+            if (i > 0) {
+                const prev = arr[i-1].split(",").map(Number);
+                accDist += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
+            }
+            return { lat, lng, ele, dist: (accDist / 1000).toFixed(1) };
+        });
+        plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
+        initChart();
+        map.fitBounds(plannedRouteLine.getBounds(), { padding: [40, 40] });
     });
-    plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
-    map.fitBounds(plannedRouteLine.getBounds(), { padding: [40, 40] });
-});
+
+function initChart() {
+    const ctx = document.getElementById('elevationChart').getContext('2d');
+    elevationChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: routeData.map(p => p.dist),
+            datasets: [{ data: routeData.map(p => p.ele), borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.1)', fill: true, pointRadius: 0, borderWidth: 2 }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: { x: { display: false }, y: { min: 0 } },
+            plugins: { legend: { display: false } },
+            onHover: (e, el) => {
+                if (el.length > 0) {
+                    const idx = el[0].index;
+                    hoverMarker.setLatLng([routeData[idx].lat, routeData[idx].lng]);
+                }
+            }
+        }
+    });
+}
 
 async function updateTrack() {
     try {
-        const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
-        const res = await fetch(SPOT_URL);
-        const allMsg = Array.from(new DOMParser().parseFromString(await res.text(), "text/xml").getElementsByTagName("message"));
-        if (!allMsg.length) return;
+        const res = await fetch("https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml");
+        const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
+        const msgs = Array.from(xml.getElementsByTagName("message"));
+        if (!msgs.length) return;
 
-        const all = allMsg.map(m => ({
-            lat: parseFloat(m.getElementsByTagName("latitude")[0].textContent),
-            lng: parseFloat(m.getElementsByTagName("longitude")[0].textContent),
-            time: new Date(m.getElementsByTagName("dateTime")[0].textContent),
-            batt: m.getElementsByTagName("batteryState")[0]?.textContent || "OK"
-        })).reverse();
+        const latest = msgs[0];
+        const lat = parseFloat(latest.getElementsByTagName("latitude")[0].textContent);
+        const lng = parseFloat(latest.getElementsByTagName("longitude")[0].textContent);
+        const time = new Date(latest.getElementsByTagName("dateTime")[0].textContent);
+        const batt = latest.getElementsByTagName("batteryState")[0]?.textContent || "OK";
 
-        const cur = all[all.length - 1];
-        if (!liveMarker) liveMarker = L.marker([cur.lat, cur.lng]).addTo(map);
-        else liveMarker.setLatLng([cur.lat, cur.lng]);
+        if (!liveMarker) liveMarker = L.marker([lat, lng]).addTo(map);
+        else liveMarker.setLatLng([lat, lng]);
 
-        document.getElementById('coord-val').innerText = `${cur.lat.toFixed(4)}, ${cur.lng.toFixed(4)}`;
-        document.getElementById('time-val').innerText = cur.time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        document.getElementById('batt-val').innerText = cur.batt;
-    } catch (e) { console.error(e); }
+        document.getElementById('coord-val').innerText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        document.getElementById('time-val').innerText = time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        document.getElementById('batt-val').innerText = batt;
+    } catch (e) { console.error("Spot update failed", e); }
 }
+
 setInterval(updateTrack, 60000);
 updateTrack();
 </script>
