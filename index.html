@@ -11,43 +11,89 @@
 
     <style>
         body { margin: 0; font-family: -apple-system, sans-serif; overflow: hidden; background: #f4f4f4; }
-        #map { height: 100vh; width: 100vw; }
+        #map { height: 100vh; width: 100vw; z-index: 1; }
 
+        /* --- UI Container --- */
         #ui-container {
             position: absolute;
-            bottom: 30px;
+            bottom: 20px;
             left: 20px;
             z-index: 1000;
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            width: 90%;
-            max-width: 450px;
+            gap: 10px;
+            width: calc(100% - 40px);
+            max-width: 600px;
+            pointer-events: none; /* Let clicks pass through to map unless on child */
         }
 
+        #ui-container > * { pointer-events: auto; }
+
+        /* --- Stats Box --- */
         #stats-box {
             background: rgba(255, 255, 255, 0.95);
-            padding: 15px;
+            padding: 12px;
             border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            gap: 10px;
             backdrop-filter: blur(5px);
         }
 
-        #elevation-box {
+        /* --- Elevation Drawer --- */
+        #elevation-drawer {
             background: rgba(255, 255, 255, 0.95);
-            padding: 10px;
             border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.15);
-            height: 160px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
             backdrop-filter: blur(5px);
+            overflow: hidden;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            max-height: 44px; /* Height of the button only */
+            width: 160px; /* Collapsed width */
         }
+
+        #elevation-drawer.expanded {
+            max-height: 250px;
+            width: 100%; /* Take full container width when expanded */
+        }
+
+        #toggle-btn {
+            width: 100%;
+            height: 44px;
+            background: #007bff;
+            color: white;
+            border: none;
+            font-weight: bold;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-transform: uppercase;
+        }
+
+        #toggle-btn:hover { background: #0056b3; }
+
+        #chart-container {
+            padding: 10px;
+            height: 180px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        #elevation-drawer.expanded #chart-container { opacity: 1; }
 
         .stat-item { border-left: 3px solid #007bff; padding-left: 8px; }
         .label { font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
         .value { font-size: 14px; color: #111; font-weight: 800; display: block; }
+
+        /* Mobile Adjustments */
+        @media (max-width: 480px) {
+            #ui-container { bottom: 10px; left: 10px; width: calc(100% - 20px); }
+            #elevation-drawer.expanded { max-height: 200px; }
+        }
     </style>
 </head>
 <body>
@@ -55,8 +101,13 @@
 <div id="map"></div>
 
 <div id="ui-container">
-    <div id="elevation-box">
-        <canvas id="elevationChart"></canvas>
+    <div id="elevation-drawer">
+        <button id="toggle-btn" onclick="toggleElevation()">
+            📈 <span>Elevation Profile</span>
+        </button>
+        <div id="chart-container">
+            <canvas id="elevationChart"></canvas>
+        </div>
     </div>
 
     <div id="stats-box">
@@ -69,6 +120,19 @@
 </div>
 
 <script>
+// --- UI Toggle Function ---
+function toggleElevation() {
+    const drawer = document.getElementById('elevation-drawer');
+    const btnText = document.querySelector('#toggle-btn span');
+    drawer.classList.toggle('expanded');
+    
+    if(drawer.classList.contains('expanded')) {
+        btnText.innerText = "Close Profile";
+    } else {
+        btnText.innerText = "Elevation Profile";
+    }
+}
+
 // --- 1. Map Setup ---
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}');
@@ -77,16 +141,14 @@ L.control.layers({ "Satellite": satellite, "Street": street }).addTo(map);
 
 let liveMarker;
 let hoverMarker = L.circleMarker([0,0], { radius: 7, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3, zIndexOffset: 2000 }).addTo(map);
-
 let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.7 }).addTo(map);
 let breadcrumbLine = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.9 }).addTo(map);
-
 let elevationChart;
 let routeData = [];
 
 const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
 
-// --- 2. Load KML & Distance Tracking ---
+// --- 2. Load KML ---
 fetch("route.kml")
     .then(res => res.text())
     .then(kmlText => {
@@ -97,21 +159,16 @@ fetch("route.kml")
         let accumulatedDist = 0;
         routeData = coordsStr.split(/\s+/).map((p, i, arr) => {
             const [lng, lat, ele] = p.split(",").map(Number);
-            
-            // Calculate distance for the X-axis of the graph
             if (i > 0) {
                 const prev = arr[i-1].split(",").map(Number);
                 accumulatedDist += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
             }
-
             return { lat, lng, ele, dist: (accumulatedDist / 1000).toFixed(1) };
         });
 
         if(routeData.length > 0) {
             plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
             initChart();
-            
-            // 2. CENTER & ZOOM TO ROUTE ON LOAD
             map.fitBounds(plannedRouteLine.getBounds(), { padding: [20, 20] });
         }
     });
@@ -125,7 +182,7 @@ function initChart() {
     elevationChart = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: distances, // 3. Use KM for the labels
+            labels: distances,
             datasets: [{
                 data: elevations,
                 borderColor: '#ff4444',
@@ -154,7 +211,6 @@ function initChart() {
                     enabled: true,
                     displayColors: false,
                     callbacks: {
-                        // 3. Show Elevation and KM in the hover box
                         title: (items) => `Distance: ${items[0].label} km`,
                         label: (context) => `Elevation: ${context.parsed.y} m`
                     }
@@ -184,7 +240,6 @@ async function updateTrack() {
             return;
         }
 
-        // 1. Parse all points (Oldest to Newest)
         const allPoints = messages.map(msg => ({
             lat: parseFloat(msg.getElementsByTagName("latitude")[0].textContent),
             lng: parseFloat(msg.getElementsByTagName("longitude")[0].textContent),
@@ -194,7 +249,6 @@ async function updateTrack() {
 
         const latest = allPoints[allPoints.length - 1];
 
-        // 2. ALWAYS Update Latest Marker & General Stats
         if (!liveMarker) {
             liveMarker = L.marker([latest.lat, latest.lng]).addTo(map).bindPopup("Latest Position");
         } else {
@@ -205,7 +259,6 @@ async function updateTrack() {
         document.getElementById('time-val').innerText = latest.time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         document.getElementById('batt-val').innerText = latest.battery;
 
-        // 3. START GATE LOGIC (Kalamata)
         const startPoint = L.latLng(37.020374, 22.143312); 
         let hasReachedStart = false;
         
@@ -215,10 +268,8 @@ async function updateTrack() {
             return hasReachedStart;
         });
 
-        // 4. Update Blue Breadcrumbs & Distance
         if (validHistory.length > 0) {
             breadcrumbLine.setLatLngs(validHistory.map(p => [p.lat, p.lng]));
-            
             let totalDist = 0;
             for(let i=0; i < validHistory.length - 1; i++) {
                 totalDist += L.latLng(validHistory[i].lat, validHistory[i].lng)
@@ -226,12 +277,10 @@ async function updateTrack() {
             }
             document.getElementById('dist-val').innerText = (totalDist / 1000).toFixed(1) + " km";
         } else {
-            // Still in Athens or on the bus
             breadcrumbLine.setLatLngs([]);
             document.getElementById('dist-val').innerText = "0.0 km (Not Started)";
         }
 
-        // 5. Speed Estimation (always active)
         if (allPoints.length > 1) {
             const p1 = allPoints[allPoints.length - 1];
             const p2 = allPoints[allPoints.length - 2];
@@ -242,7 +291,6 @@ async function updateTrack() {
 
     } catch (e) { 
         console.error("Update Error:", e);
-        document.getElementById('coord-val').innerText = "Connection Error";
     }
 }
 setInterval(updateTrack, 60000);
