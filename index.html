@@ -43,17 +43,11 @@
         .label { font-size: 8px; color: #666; text-transform: uppercase; font-weight: bold; }
         .value { font-size: 12px; color: #000; font-weight: 800; display: block; }
 
-        /* Icon Styling */
         .custom-marker {
             display: flex; justify-content: center; align-items: center;
             border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4);
         }
-        .bike-live { background: #007bff; color: white; font-size: 16px; width: 36px !important; height: 36px !important; margin-left: -18px !important; margin-top: -18px !important; }
-        .poi-camp { background: #2e7d32; color: white; }
-        .poi-water { background: #0288d1; color: white; }
-        .poi-shop { background: #ef6c00; color: white; }
-        .poi-hab { background: #795548; color: white; }
-        .poi-default { background: #616161; color: white; }
+        .bike-live { width: 36px !important; height: 36px !important; margin-left: -18px !important; margin-top: -18px !important; }
     </style>
 </head>
 <body>
@@ -90,7 +84,7 @@ const hybrid = L.layerGroup([satellite, labels]);
 const map = L.map('map', { 
     zoomControl: false, 
     layers: [hybrid],
-    renderer: L.canvas({ tolerance: 20 })   // increases hit area for lines & polygons
+    renderer: L.canvas({ tolerance: 20 })
 }).setView([37.5, 22.3], 8);
 
 const infoLayer = L.layerGroup().addTo(map);
@@ -127,16 +121,16 @@ fetch("Cross PeloponneseFINAL.gpx").then(r => r.text()).then(txt => {
         const lon = parseFloat(w.getAttribute("lon"));
         const name = w.getElementsByTagName("name")[0]?.textContent || "";
         const sym = w.getElementsByTagName("sym")[0]?.textContent || "";
-        L.marker([lat, lon], { icon: getPoiIcon(sym, name) }).bindPopup(`<b>${name}</b>`).addTo(infoLayer);
+        L.marker([lat, lon], { icon: getPoiIcon(sym, name) })
+            .bindPopup(`<b>${name}</b>`)
+            .addTo(infoLayer);
     }
 });
 
 // Route & Elevation
 let routeData = [];
 let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 5, opacity: 0.85 }).addTo(map);
-let routeFill;           // polygon under the line (for big hover area)
-let chartInstance;
-let hoverLine;           // vertical line on chart
+let routeFill;
 
 fetch("route.kml").then(r => r.text()).then(txt => {
     const kml = new DOMParser().parseFromString(txt, "text/xml");
@@ -149,18 +143,17 @@ fetch("route.kml").then(r => r.text()).then(txt => {
             const prev = arr[i-1].split(",").map(Number);
             accDist += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
         }
-        return { lat, lng, ele, dist: (accDist / 1000).toFixed(1) };
+        return { lat, lng, ele, dist: accDist / 1000 };
     });
 
     const latlngs = routeData.map(p => [p.lat, p.lng]);
     plannedRouteLine.setLatLngs(latlngs);
 
-    // Big clickable/hoverable area under the route
     routeFill = L.polygon(latlngs, {
         color: 'transparent',
         fillColor: '#ff4444',
         fillOpacity: 0.12,
-        weight: 20,           // thick invisible hit area
+        weight: 20,
         interactive: true
     }).addTo(map);
 
@@ -170,10 +163,10 @@ fetch("route.kml").then(r => r.text()).then(txt => {
 function initChart() {
     const ctx = document.getElementById('elevationChart').getContext('2d');
     
-    chartInstance = new Chart(ctx, {
+    new Chart(ctx, {
         type: 'line',
         data: {
-            labels: routeData.map(p => parseFloat(p.dist)),
+            labels: routeData.map(p => p.dist),
             datasets: [{
                 data: routeData.map(p => p.ele),
                 borderColor: '#ff4444',
@@ -188,63 +181,33 @@ function initChart() {
             responsive: true,
             maintainAspectRatio: false,
             interaction: { intersect: false, mode: 'index' },
-            scales: { 
-                x: { display: true, title: { display: true, text: 'Distance (km)' } },
+            scales: {
+                x: {
+                    display: true,
+                    title: { display: false },                    // removed label
+                    ticks: {
+                        stepSize: 50,                             // every 50 km
+                        callback: function(value) {
+                            return value % 50 === 0 ? value : '';
+                        }
+                    }
+                },
                 y: { min: 0, title: { display: true, text: 'Elevation (m)' } }
             },
-            plugins: { 
+            plugins: {
                 legend: { display: false },
-                tooltip: { mode: 'index', intersect: false }
-            },
-            onHover: (event, elements) => {
-                if (elements.length > 0) {
-                    const idx = elements[0].index;
-                    highlightRoutePoint(idx);
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                        label: function(context) {
+                            const dist = context.parsed.x.toFixed(0);
+                            const ele = context.parsed.y.toFixed(0);
+                            return `${dist} km — ${ele} m`;
+                        }
+                    }
                 }
             }
-        }
-    });
-}
-
-// Highlight point on map when hovering chart (or area under line)
-function highlightRoutePoint(idx) {
-    if (!routeData[idx]) return;
-    const point = routeData[idx];
-    
-    // You can add a temporary marker or circle here if you want visual feedback on map
-    // For now we just log — feel free to extend
-    console.log(`Hovered at ${point.dist} km, ${point.ele} m`);
-}
-
-// Make the area under the line also trigger chart hover
-if (routeFill) {
-    routeFill.on('mousemove', function(e) {
-        if (!chartInstance || !routeData.length) return;
-        
-        // Find closest point on route to mouse position
-        let minDist = Infinity;
-        let closestIdx = 0;
-        
-        routeData.forEach((p, i) => {
-            const d = e.latlng.distanceTo([p.lat, p.lng]);
-            if (d < minDist) {
-                minDist = d;
-                closestIdx = i;
-            }
-        });
-        
-        // Simulate hover on chart
-        const meta = chartInstance.getDatasetMeta(0);
-        if (meta && meta.data[closestIdx]) {
-            const point = meta.data[closestIdx];
-            const rect = chartInstance.canvas.getBoundingClientRect();
-            
-            // Trigger tooltip
-            chartInstance.tooltip.setActiveElements([{ datasetIndex: 0, index: closestIdx }], {
-                x: rect.left + point.x,
-                y: rect.top + point.y
-            });
-            chartInstance.update('none');
         }
     });
 }
@@ -270,7 +233,9 @@ async function updateTrack() {
         });
 
         if (!liveMarker) {
-            liveMarker = L.marker([lat, lng], { icon: liveIcon }).addTo(map);
+            liveMarker = L.marker([lat, lng], { icon: liveIcon })
+                .bindPopup("<b>KOSMAS</b>")
+                .addTo(map);
         } else {
             liveMarker.setLatLng([lat, lng]);
         }
