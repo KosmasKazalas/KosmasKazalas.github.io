@@ -12,87 +12,37 @@
     <style>
         body { margin: 0; font-family: -apple-system, sans-serif; overflow: hidden; background: #000; }
         #map { height: 100vh; width: 100vw; z-index: 1; }
-
-        /* --- Stats Box (Top Left) --- */
         #stats-box {
-            position: absolute;
-            top: 15px;
-            left: 15px;
-            z-index: 1000;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 10px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-            display: grid;
-            grid-template-columns: auto auto;
-            column-gap: 12px;
-            row-gap: 6px;
-            backdrop-filter: blur(8px);
-            width: fit-content;
+            position: absolute; top: 15px; left: 15px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.9); padding: 10px; border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3); display: grid;
+            grid-template-columns: auto auto; column-gap: 12px; row-gap: 6px;
+            backdrop-filter: blur(8px); width: fit-content;
         }
-
-        /* --- Elevation Toggle Button --- */
         #toggle-btn {
-            position: absolute;
-            bottom: 20px;
-            left: 15px;
-            z-index: 1002;
-            height: 40px;
-            padding: 0 15px;
-            background: #007bff;
-            color: white;
-            border: none;
-            border-radius: 20px;
-            font-weight: bold;
-            font-size: 11px;
-            cursor: pointer;
-            text-transform: uppercase;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            display: flex;
-            align-items: center;
-            gap: 8px;
+            position: absolute; bottom: 20px; left: 15px; z-index: 1002;
+            height: 40px; padding: 0 15px; background: #007bff; color: white;
+            border: none; border-radius: 20px; font-weight: bold; font-size: 11px;
+            cursor: pointer; text-transform: uppercase; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: flex; align-items: center; gap: 8px;
         }
-
-        /* --- Elevation Drawer --- */
         #elevation-drawer {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            width: 100%;
-            height: 0;
-            z-index: 1001;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            overflow: hidden;
-            border-top: 1px solid rgba(0,0,0,0.1);
+            position: absolute; bottom: 0; left: 0; width: 100%; height: 0;
+            z-index: 1001; background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px); transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            overflow: hidden; border-top: 1px solid rgba(0,0,0,0.1);
         }
-
         #elevation-drawer.expanded { height: 200px; }
-
-        #chart-wrap {
-            width: 100%;
-            height: 100%;
-            padding: 15px;
-            box-sizing: border-box;
-        }
-
+        #chart-wrap { width: 100%; height: 100%; padding: 15px; box-sizing: border-box; }
         #elevation-drawer.expanded ~ #toggle-btn { bottom: 210px; }
-
         .stat-item { border-left: 2px solid #007bff; padding-left: 6px; }
         .label { font-size: 8px; color: #666; text-transform: uppercase; font-weight: bold; }
         .value { font-size: 12px; color: #000; font-weight: 800; display: block; }
-
-        @media (max-width: 480px) {
-            #elevation-drawer.expanded { height: 160px; }
-            #elevation-drawer.expanded ~ #toggle-btn { bottom: 170px; }
-        }
     </style>
 </head>
 <body>
 
 <div id="map"></div>
-
 <div id="stats-box">
     <div class="stat-item"><span class="label">Speed</span><span id="speed-val" class="value">-- km/h</span></div>
     <div class="stat-item"><span class="label">Distance</span><span id="dist-val" class="value">-- km</span></div>
@@ -102,9 +52,7 @@
 </div>
 
 <div id="elevation-drawer">
-    <div id="chart-wrap">
-        <canvas id="elevationChart"></canvas>
-    </div>
+    <div id="chart-wrap"><canvas id="elevationChart"></canvas></div>
 </div>
 
 <button id="toggle-btn" onclick="toggleElevation()">📈 Elevation</button>
@@ -117,7 +65,6 @@ function toggleElevation() {
     btn.innerHTML = drw.classList.contains('expanded') ? "✕ Close" : "📈 Elevation";
 }
 
-// Map Layers with Hybrid Labels
 const satelliteHybrid = L.layerGroup([
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'),
     L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}')
@@ -125,53 +72,47 @@ const satelliteHybrid = L.layerGroup([
 const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png');
 
 const map = L.map('map', { zoomControl: false, layers: [satelliteHybrid] });
+const infoLayer = L.layerGroup().addTo(map);
+
 L.control.zoom({ position: 'topright' }).addTo(map);
-L.control.layers({ "Hybrid Satellite": satelliteHybrid, "Street Map": street }, null, { position: 'topright' }).addTo(map);
+L.control.layers(
+    { "Hybrid Satellite": satelliteHybrid, "Street Map": street },
+    { "Infopoints": infoLayer },
+    { position: 'topright' }
+).addTo(map);
 
 let liveMarker, hoverMarker = L.circleMarker([0,0], { radius: 6, color: '#ff4444', fillColor: 'white', fillOpacity: 1, weight: 3, zIndexOffset: 2000 }).addTo(map);
 let plannedRouteLine = L.polyline([], { color: '#ff4444', weight: 4, opacity: 0.7 }).addTo(map);
 let breadcrumbLine = L.polyline([], { color: '#007bff', weight: 5, opacity: 0.9 }).addTo(map);
-let elevationChart, routeData = [];
+let routeData = [];
 
-const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
+// Load GPX for Waypoints (Infopoints)
+fetch("Cross PeloponneseFINAL.gpx").then(r => r.text()).then(txt => {
+    const gpx = new DOMParser().parseFromString(txt, "text/xml");
+    const wpts = gpx.getElementsByTagName("wpt");
+    for (let w of wpts) {
+        const lat = w.getAttribute("lat"), lon = w.getAttribute("lon");
+        const name = w.getElementsByTagName("name")[0]?.textContent || "Point";
+        const sym = w.getElementsByTagName("sym")[0]?.textContent || "";
+        L.marker([lat, lon]).bindPopup(`<b>${name}</b><br>${sym}`).addTo(infoLayer);
+    }
+});
 
-fetch("route.kml").then(r => r.text()).then(txt => {
+// Load KML for Route
+fetch("Cross Peloponnese 2026.kml").then(r => r.text()).then(txt => {
     const kml = new DOMParser().parseFromString(txt, "text/xml");
     const coordsStr = kml.getElementsByTagName("coordinates")[0].textContent.trim();
-    let acc = 0;
-    routeData = coordsStr.split(/\s+/).map((p, i, arr) => {
-        const [lng, lat, ele] = p.split(",").map(Number);
-        if (i > 0) {
-            const prev = arr[i-1].split(",").map(Number);
-            acc += L.latLng(lat, lng).distanceTo(L.latLng(prev[1], prev[0]));
-        }
-        return { lat, lng, ele, dist: (acc / 1000).toFixed(1) };
+    routeData = coordsStr.split(/\s+/).map(p => {
+        const [lng, lat] = p.split(",").map(Number);
+        return { lat, lng, ele: 0 }; // Elevations are not in this KML, logic remains for structure
     });
     plannedRouteLine.setLatLngs(routeData.map(p => [p.lat, p.lng]));
-    initChart();
     map.fitBounds(plannedRouteLine.getBounds(), { padding: [40, 40] });
 });
 
-function initChart() {
-    const ctx = document.getElementById('elevationChart').getContext('2d');
-    elevationChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: routeData.map(p => p.dist),
-            datasets: [{ data: routeData.map(p => p.ele), borderColor: '#ff4444', backgroundColor: 'rgba(255, 68, 68, 0.1)', fill: true, pointRadius: 0, borderWidth: 2, tension: 0.1 }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            scales: { x: { display: false }, y: { min: 0, ticks: { size: 9 } } },
-            plugins: { legend: { display: false }, tooltip: { enabled: true, callbacks: { title: (i) => i[0].label + ' km', label: (c) => c.parsed.y + ' m' } } },
-            onHover: (e, el) => { if (el.length > 0) hoverMarker.setLatLng([routeData[el[0].index].lat, routeData[el[0].index].lng]); }
-        }
-    });
-}
-
 async function updateTrack() {
     try {
+        const SPOT_URL = "https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
         const res = await fetch(SPOT_URL);
         const allMsg = Array.from(new DOMParser().parseFromString(await res.text(), "text/xml").getElementsByTagName("message"));
         if (!allMsg.length) return;
@@ -188,34 +129,8 @@ async function updateTrack() {
         else liveMarker.setLatLng([cur.lat, cur.lng]);
 
         document.getElementById('coord-val').innerText = `${cur.lat.toFixed(4)}, ${cur.lng.toFixed(4)}`;
-        
-        // --- RESTORED DATE FORMATTING HERE ---
         document.getElementById('time-val').innerText = cur.time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        
         document.getElementById('batt-val').innerText = cur.batt;
-
-        const startPos = L.latLng(37.0203, 22.1433); 
-        let isStarted = false;
-        const trail = all.filter(p => {
-            if (L.latLng(p.lat, p.lng).distanceTo(startPos) < 2000) isStarted = true;
-            return isStarted;
-        });
-
-        if (trail.length) {
-            breadcrumbLine.setLatLngs(trail.map(p => [p.lat, p.lng]));
-            let d = 0;
-            for(let i=0; i<trail.length-1; i++) d += L.latLng(trail[i]).distanceTo(L.latLng(trail[i+1]));
-            document.getElementById('dist-val').innerText = (d/1000).toFixed(1) + " km";
-        } else {
-            document.getElementById('dist-val').innerText = "0.0 km";
-        }
-
-        if (all.length > 1) {
-            const p1 = all[all.length-1], p2 = all[all.length-2];
-            const hrs = Math.abs(p1.time - p2.time) / 36e5;
-            const km = L.latLng(p1.lat, p1.lng).distanceTo(L.latLng(p2.lat, p2.lng)) / 1000;
-            document.getElementById('speed-val').innerText = (hrs > 0 && hrs < 3) ? (km/hrs).toFixed(1) + " km/h" : "0.0 km/h";
-        }
     } catch (e) { console.error(e); }
 }
 setInterval(updateTrack, 60000);
