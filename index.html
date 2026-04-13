@@ -266,19 +266,44 @@ function attachMapEvents() {
 
 let liveMarker;
 async function updateTrack() {
+    const coordEl = document.getElementById('coord-val');
+    const timeEl = document.getElementById('time-val');
+    const battEl = document.getElementById('batt-val');
+
     try {
-        const res = await fetch("https://api.allorigins.win/raw?url=https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml");
-        const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
+        // Use a timestamp to prevent the proxy/browser from caching old data
+        const ts = new Date().getTime();
+        const spotUrl = "https://api.findmespot.com/spot-main-web/consumer/rest-api/2.0/public/feed/0q9neniSu2ZeyQnhvBGPjWiqvDFJd3sEO/message.xml";
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(spotUrl)}&v=${ts}`;
+
+        const res = await fetch(proxyUrl);
+        if (!res.ok) throw new Error('Network response was not ok');
+        
+        const text = await res.text();
+        const xml = new DOMParser().parseFromString(text, "text/xml");
+        
+        // Find the latest message
         const msg = xml.getElementsByTagName("message")[0];
-        if (!msg) return;
+        
+        if (!msg) {
+            coordEl.innerText = "No Signal / Waiting...";
+            return;
+        }
 
         const lat = parseFloat(msg.getElementsByTagName("latitude")[0].textContent);
         const lng = parseFloat(msg.getElementsByTagName("longitude")[0].textContent);
-        const time = new Date(msg.getElementsByTagName("dateTime")[0].textContent);
+        const timeStr = msg.getElementsByTagName("dateTime")[0].textContent;
+        const time = new Date(timeStr);
         const batt = msg.getElementsByTagName("batteryState")[0]?.textContent || "OK";
 
+        // Update UI
+        coordEl.innerText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        timeEl.innerText = time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        battEl.innerText = batt;
+
+        // Update Marker
         const liveIcon = L.divIcon({ 
-            html: `<img src="kosmasICON.PNG" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">`,
+            html: `<img src="kosmasICON.PNG" style="width:36px;height:36px;border-radius:50%;border:2px solid #007bff;object-fit:cover;">`,
             className: 'custom-marker bike-live',
             iconSize: [36, 36],
             iconAnchor: [18, 18]
@@ -286,15 +311,17 @@ async function updateTrack() {
 
         if (!liveMarker) {
             liveMarker = L.marker([lat, lng], { icon: liveIcon }).addTo(map);
+            map.panTo([lat, lng]); // Move map to rider on first load
         } else {
             liveMarker.setLatLng([lat, lng]);
         }
 
-        document.getElementById('coord-val').innerText = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-        document.getElementById('time-val').innerText = time.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        document.getElementById('batt-val').innerText = batt;
     } catch (e) { 
-        console.error(e); 
+        console.error("Tracking Error:", e);
+        // If it's the first time and it fails, show an error instead of "Syncing"
+        if (coordEl.innerText === "Syncing...") {
+            coordEl.innerText = "Connection Error (Retrying)";
+        }
     }
 }
 
